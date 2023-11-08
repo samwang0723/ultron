@@ -5,16 +5,15 @@ use crate::engine::parser::{ConcentrationStrategy, Parser};
 
 use chrono::{Datelike, Local};
 use std::collections::HashMap;
-use std::env;
 use std::io::{self, Write};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Semaphore};
 
 static CONCENTRATION_PAGES: usize = 5;
-static PROXY_URL: &str = "https://api.webscrapingapi.com/v1";
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)]
 async fn main() {
+    dotenv::dotenv().ok();
     tracing_subscriber::fmt::init();
 
     // List of URLs to process
@@ -32,9 +31,6 @@ async fn main() {
 }
 
 async fn generate_urls(url_tx: mpsc::Sender<String>, stocks: Vec<&str>) {
-    let proxy_api_key =
-        env::var("PROXY_API_KEY").expect("PROXY_API_KEY not found in the environment");
-    let proxy_url = format!("{}?api_key={}", PROXY_URL, proxy_api_key);
     for stock in stocks.iter() {
         for i in 1..=CONCENTRATION_PAGES {
             // skip the 40 days calculation
@@ -43,9 +39,7 @@ async fn generate_urls(url_tx: mpsc::Sender<String>, stocks: Vec<&str>) {
                 "https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco_{}_{}.djhtm",
                 stock, index
             );
-            let crawl_url = format!("{}&url={}", proxy_url, url);
-
-            url_tx.send(crawl_url).await.expect("Failed to send URL");
+            url_tx.send(url).await.expect("Failed to send URL");
         }
     }
 

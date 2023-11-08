@@ -1,7 +1,21 @@
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
+use once_cell::sync::Lazy;
 use reqwest::StatusCode;
 use tokio::fs;
+
+// Define a static instance of `Client` which will be initialized on the first use
+static CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
+    let account = std::env::var("PROXY_USER").unwrap();
+    let password = std::env::var("PROXY_PASSWD").unwrap();
+    let proxy_url = format!("http://{}:{}@gate.smartproxy.com:7000", account, password);
+    let proxy = reqwest::Proxy::https(proxy_url).expect("Failed to create proxy");
+    reqwest::Client::builder()
+        .proxy(proxy)
+        // Optionally configure the client
+        .build()
+        .expect("Failed to create Client")
+});
 
 #[derive(Debug)]
 pub struct Payload {
@@ -36,7 +50,7 @@ impl<'a> Fetch for UrlFetcher<'a> {
     type Error = anyhow::Error;
 
     async fn fetch(&self) -> Result<Payload, Self::Error> {
-        let resp = reqwest::get(self.0).await?;
+        let resp = CLIENT.get(self.0).send().await?;
         match resp.status() {
             StatusCode::OK => {
                 let content_type = resp
