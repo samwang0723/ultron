@@ -1,4 +1,5 @@
 mod engine;
+mod stocks;
 use crate::engine::fetcher::{fetch_content, Payload};
 use crate::engine::model::Model;
 use crate::engine::parser::{ConcentrationStrategy, Parser};
@@ -17,7 +18,13 @@ async fn main() {
     tracing_subscriber::fmt::init();
 
     // List of URLs to process
-    let stocks = vec!["2330", "2363", "8150"];
+    let stocks = match stocks::get_stock_codes_from_file("stocks.json") {
+        Ok(stocks) => stocks,
+        Err(e) => {
+            eprintln!("Failed to read stock codes from file: {}", e);
+            return;
+        }
+    };
 
     let capacity = stocks.len() * CONCENTRATION_PAGES;
     let (url_tx, url_rx) = mpsc::channel(capacity);
@@ -30,7 +37,8 @@ async fn main() {
     let _results = tokio::try_join!(url_gen_handle, fetch_aggregate_handle);
 }
 
-async fn generate_urls(url_tx: mpsc::Sender<String>, stocks: Vec<&str>) {
+async fn generate_urls(url_tx: mpsc::Sender<String>, stocks: Vec<String>) {
+    let mut sum = 0;
     for stock in stocks.iter() {
         for i in 1..=CONCENTRATION_PAGES {
             // skip the 40 days calculation
@@ -40,6 +48,11 @@ async fn generate_urls(url_tx: mpsc::Sender<String>, stocks: Vec<&str>) {
                 stock, index
             );
             url_tx.send(url).await.expect("Failed to send URL");
+        }
+        sum += CONCENTRATION_PAGES;
+        if sum % 25 == 0 {
+            // Sleep for a while
+            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
         }
     }
 
