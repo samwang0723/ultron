@@ -4,7 +4,15 @@ use once_cell::sync::Lazy;
 use reqwest::StatusCode;
 use tokio::fs;
 
+#[cfg(feature = "testing")]
+static CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
+    reqwest::Client::builder()
+        .build()
+        .expect("Failed to create Client")
+});
+
 // Define a static instance of `Client` which will be initialized on the first use
+#[cfg(not(feature = "testing"))]
 static CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
     let account = std::env::var("PROXY_USER").unwrap();
     let password = std::env::var("PROXY_PASSWD").unwrap();
