@@ -1,0 +1,12 @@
+version: '3.5'
+services:
+  ultron:
+    container_name: ultron
+    image: samwang0723/ultron:v0.1.0
+    env_file:
+      - ../.env
+    networks:
+      - default
+networks:
+  default:
+    driver: bridge

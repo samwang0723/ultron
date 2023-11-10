@@ -1,9 +1,16 @@
 # syntax=docker/dockerfile:1
 # Stage 1: Build the Rust application
-FROM rust:1.62-alpine as build_base
+FROM rust:1.73-alpine as build_base
 
 # Add Maintainer Info
 LABEL maintainer="Sam Wang <sam.wang.0723@gmail.com>"
+
+# Install required packages
+RUN apk add --no-cache \
+    build-base \
+    libc6-compat \
+    openssl-dev \
+    pkgconfig
 
 RUN apk add --no-cache git
 RUN apk update && apk add ca-certificates && apk add tzdata
