@@ -17,6 +17,7 @@ pub trait ParseStrategy: Conversion {
 
 pub trait Conversion {
     fn to_i32(&self, data: &str) -> Result<i32, anyhow::Error>;
+    fn to_f32(&self, data: &str) -> Result<f32, anyhow::Error>;
     fn to_usize(&self, data: &str) -> Result<usize, anyhow::Error>;
 }
 
@@ -37,6 +38,10 @@ impl ParseStrategy for DailyCloseStrategy {
 impl Conversion for DailyCloseStrategy {
     fn to_i32(&self, _data: &str) -> Result<i32, anyhow::Error> {
         Err(anyhow!("DailyCloseStrategy to_i32 not yet implemented"))
+    }
+
+    fn to_f32(&self, _data: &str) -> Result<f32, anyhow::Error> {
+        Err(anyhow!("DailyCloseStrategy to_f32 not yet implemented"))
     }
 
     fn to_usize(&self, _data: &str) -> Result<usize, anyhow::Error> {
@@ -92,6 +97,8 @@ impl ParseStrategy for ConcentrationStrategy {
         let mut index: usize = 0;
         let mut total_buy = 0;
         let mut total_sell = 0;
+        let mut avg_buy_price: f32 = 0.0;
+        let mut avg_sell_price: f32 = 0.0;
         for element in document.select(&selector) {
             if let Some(colspan) = element.value().attr("colspan") {
                 if colspan != "4" {
@@ -102,12 +109,22 @@ impl ParseStrategy for ConcentrationStrategy {
             match index {
                 0 => total_buy = self.to_i32(&text)?,
                 1 => total_sell = self.to_i32(&text)?,
+                2 => avg_buy_price = self.to_f32(&text)?,
+                3 => avg_sell_price = self.to_f32(&text)?,
                 _ => {}
             }
             index += 1;
         }
 
-        Ok(model::Concentration(stock_id, pos, total_buy - total_sell))
+        Ok(model::Concentration(
+            stock_id,
+            pos,
+            total_buy - total_sell,
+            total_buy,
+            total_sell,
+            avg_buy_price,
+            avg_sell_price,
+        ))
     }
 }
 
@@ -115,6 +132,11 @@ impl Conversion for ConcentrationStrategy {
     fn to_i32(&self, data: &str) -> Result<i32, anyhow::Error> {
         let without_comma = data.replace(',', ""); // This will do nothing if there is no comma
         without_comma.parse::<i32>().map_err(|e| anyhow!(e))
+    }
+
+    fn to_f32(&self, data: &str) -> Result<f32, anyhow::Error> {
+        let without_comma = data.replace(',', ""); // This will do nothing if there is no comma
+        without_comma.parse::<f32>().map_err(|e| anyhow!(e))
     }
 
     fn to_usize(&self, data: &str) -> Result<usize, anyhow::Error> {
@@ -188,6 +210,10 @@ mod tests {
         assert_eq!(concentration.0, "2330");
         assert_eq!(concentration.1, 1);
         assert_eq!(concentration.2, 856);
+        assert_eq!(concentration.3, 2108);
+        assert_eq!(concentration.4, 1252);
+        assert_eq!(concentration.5, 54.59);
+        assert_eq!(concentration.6, 54.32);
     }
 
     #[test]

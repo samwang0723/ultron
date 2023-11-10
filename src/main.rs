@@ -5,9 +5,8 @@ use crate::engine::model::Model;
 use crate::engine::parser::{ConcentrationStrategy, Parser};
 
 use chrono::{Datelike, Local};
-use indicatif::ProgressBar;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tokio::sync::{mpsc, Semaphore};
 
 static CONCENTRATION_PAGES: usize = 5;
@@ -29,19 +28,12 @@ async fn main() {
     let capacity = stocks.len() * CONCENTRATION_PAGES;
     let (url_tx, url_rx) = mpsc::channel(capacity);
 
-    // Display progress
-    let pb = ProgressBar::new(stocks.len().try_into().unwrap());
-    let mpb = Arc::new(Mutex::new(pb));
-
     // retrieve all handles and ensure process not termiated before tasks completed
     let url_gen_handle = tokio::spawn(generate_urls(url_tx, stocks.clone()));
-    let fetch_aggregate_handle = tokio::spawn(fetch_urls(url_rx, mpb.clone(), capacity));
+    let fetch_aggregate_handle = tokio::spawn(fetch_urls(url_rx, capacity));
 
     // Await on both handles to ensure completion
     let _results = tokio::try_join!(url_gen_handle, fetch_aggregate_handle);
-
-    // End the progress bar
-    mpb.lock().unwrap().finish();
 }
 
 async fn generate_urls(url_tx: mpsc::Sender<String>, stocks: Vec<String>) {
@@ -66,11 +58,7 @@ async fn generate_urls(url_tx: mpsc::Sender<String>, stocks: Vec<String>) {
     drop(url_tx);
 }
 
-async fn fetch_urls(
-    mut url_rx: mpsc::Receiver<String>,
-    pb: Arc<Mutex<ProgressBar>>,
-    capacity: usize,
-) {
+async fn fetch_urls(mut url_rx: mpsc::Receiver<String>, capacity: usize) {
     let semaphore = Arc::new(Semaphore::new(50));
     let (content_tx, content_rx) = mpsc::channel(capacity);
 
@@ -100,13 +88,13 @@ async fn fetch_urls(
         }
     });
 
-    let aggregate_handle = tokio::spawn(aggregate(content_rx, pb));
+    let aggregate_handle = tokio::spawn(aggregate(content_rx));
 
     // Await on both handles to ensure completion
     let _results = tokio::try_join!(fetch_handle, aggregate_handle);
 }
 
-async fn aggregate(mut content_rx: mpsc::Receiver<Payload>, pb: Arc<Mutex<ProgressBar>>) {
+async fn aggregate(mut content_rx: mpsc::Receiver<Payload>) {
     let today = Local::now();
     let formatted_date = format!("{}{:02}{:02}", today.year(), today.month(), today.day());
     let mut stock_map: HashMap<String, Model> = HashMap::new();
@@ -116,10 +104,6 @@ async fn aggregate(mut content_rx: mpsc::Receiver<Payload>, pb: Arc<Mutex<Progre
         let parser = Parser::new(ConcentrationStrategy);
         let res = parser.parse(payload).await;
 
-        // Update progress
-        let pb_ref = pb.lock().unwrap();
-        pb_ref.inc(1);
-
         if let Ok(res_value) = res {
             let model = stock_map
                 .entry(res_value.0.clone())
@@ -127,15 +111,27 @@ async fn aggregate(mut content_rx: mpsc::Receiver<Payload>, pb: Arc<Mutex<Progre
                     stock_id: res_value.0,
                     exchange_date: formatted_date.clone(),
                     concentration: vec![0; 5],
+                    sum_buy_shares: 0,
+                    sum_sell_shares: 0,
+                    avg_buy_price: 0.0,
+                    avg_sell_price: 0.0,
+                    current: 0,
                 });
-            model.concentration[res_value.1] = res_value.2;
+            model.concentration[res_value.1] = res_value.2; // Set diff num based on index
+
+            if res_value.1 == 0 {
+                model.sum_buy_shares = res_value.3;
+                model.sum_sell_shares = res_value.4;
+                model.avg_buy_price = res_value.5;
+                model.avg_sell_price = res_value.6;
+            }
+
+            model.current += 1;
+            if model.current == 5 {
+                println!("{}", model.to_json().unwrap());
+            }
         } else if let Err(e) = res {
             eprintln!("Failed to parse content for URL {}: {}", url, e);
         }
-    }
-
-    // extract items from map and print json string
-    for (_, model) in stock_map.iter() {
-        println!("{}", model.to_json().unwrap());
     }
 }
