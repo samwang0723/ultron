@@ -5,9 +5,9 @@ use crate::engine::model::Model;
 use crate::engine::parser::{ConcentrationStrategy, Parser};
 
 use chrono::{Datelike, Local};
+use indicatif::ProgressBar;
 use std::collections::HashMap;
-use std::io::{self, Write};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::sync::{mpsc, Semaphore};
 
 static CONCENTRATION_PAGES: usize = 5;
@@ -29,12 +29,19 @@ async fn main() {
     let capacity = stocks.len() * CONCENTRATION_PAGES;
     let (url_tx, url_rx) = mpsc::channel(capacity);
 
+    // Display progress
+    let pb = ProgressBar::new(stocks.len().try_into().unwrap());
+    let mpb = Arc::new(Mutex::new(pb));
+
     // retrieve all handles and ensure process not termiated before tasks completed
     let url_gen_handle = tokio::spawn(generate_urls(url_tx, stocks.clone()));
-    let fetch_aggregate_handle = tokio::spawn(fetch_urls(url_rx, capacity));
+    let fetch_aggregate_handle = tokio::spawn(fetch_urls(url_rx, mpb.clone(), capacity));
 
     // Await on both handles to ensure completion
     let _results = tokio::try_join!(url_gen_handle, fetch_aggregate_handle);
+
+    // End the progress bar
+    mpb.lock().unwrap().finish();
 }
 
 async fn generate_urls(url_tx: mpsc::Sender<String>, stocks: Vec<String>) {
@@ -59,15 +66,16 @@ async fn generate_urls(url_tx: mpsc::Sender<String>, stocks: Vec<String>) {
     drop(url_tx);
 }
 
-async fn fetch_urls(mut url_rx: mpsc::Receiver<String>, capacity: usize) {
+async fn fetch_urls(
+    mut url_rx: mpsc::Receiver<String>,
+    pb: Arc<Mutex<ProgressBar>>,
+    capacity: usize,
+) {
     let semaphore = Arc::new(Semaphore::new(50));
     let (content_tx, content_rx) = mpsc::channel(capacity);
 
     let fetch_handle = tokio::spawn(async move {
         while let Some(url) = url_rx.recv().await {
-            print!(".");
-            io::stdout().flush().unwrap();
-
             let sem_clone = Arc::clone(&semaphore);
             let content_tx_clone = content_tx.clone();
             tokio::spawn(async move {
@@ -78,9 +86,6 @@ async fn fetch_urls(mut url_rx: mpsc::Receiver<String>, capacity: usize) {
 
                 match fetch_content(url.clone()).await {
                     Ok(payload) => {
-                        print!("_");
-                        io::stdout().flush().unwrap();
-
                         if let Err(e) = content_tx_clone.send(payload).await {
                             eprintln!("Failed to send content: {}", e);
                         }
@@ -95,13 +100,13 @@ async fn fetch_urls(mut url_rx: mpsc::Receiver<String>, capacity: usize) {
         }
     });
 
-    let aggregate_handle = tokio::spawn(aggregate(content_rx));
+    let aggregate_handle = tokio::spawn(aggregate(content_rx, pb));
 
     // Await on both handles to ensure completion
     let _results = tokio::try_join!(fetch_handle, aggregate_handle);
 }
 
-async fn aggregate(mut content_rx: mpsc::Receiver<Payload>) {
+async fn aggregate(mut content_rx: mpsc::Receiver<Payload>, pb: Arc<Mutex<ProgressBar>>) {
     let today = Local::now();
     let formatted_date = format!("{}{:02}{:02}", today.year(), today.month(), today.day());
     let mut stock_map: HashMap<String, Model> = HashMap::new();
@@ -110,8 +115,11 @@ async fn aggregate(mut content_rx: mpsc::Receiver<Payload>) {
         let url = payload.source.clone();
         let parser = Parser::new(ConcentrationStrategy);
         let res = parser.parse(payload).await;
-        print!("*");
-        io::stdout().flush().unwrap();
+
+        // Update progress
+        let pb_ref = pb.lock().unwrap();
+        pb_ref.inc(1);
+
         if let Ok(res_value) = res {
             let model = stock_map
                 .entry(res_value.0.clone())
@@ -127,7 +135,6 @@ async fn aggregate(mut content_rx: mpsc::Receiver<Payload>) {
     }
 
     // extract items from map and print json string
-    println!(" ");
     for (_, model) in stock_map.iter() {
         println!("{}", model.to_json().unwrap());
     }
