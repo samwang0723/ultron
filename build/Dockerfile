@@ -10,7 +10,8 @@ RUN apk add --no-cache \
     build-base \
     libc6-compat \
     openssl-dev \
-    pkgconfig
+    pkgconfig \
+    cmake
 
 RUN apk add --no-cache git
 RUN apk update && apk add ca-certificates && apk add tzdata

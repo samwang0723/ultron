@@ -1,0 +1,30 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ultron-cronjob
+spec:
+  schedule: "0 18 * * 1-5"  # At 6 PM on every day-of-week from Monday through Friday
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: ultron
+            image: samwang0723/ultron:v0.1.0
+            env:
+            - name: PROXY_USER
+              valueFrom:
+                secretKeyRef:
+                  name: proxy-secret
+                  key: username
+            - name: PROXY_PASSWD
+              valueFrom:
+                secretKeyRef:
+                  name: proxy-secret
+                  key: passwd
+            - name: KAFKA_BROKERS
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-brokers
+                  key: brokers
+          restartPolicy: Never
