@@ -99,7 +99,8 @@ async fn aggregate(mut content_rx: mpsc::Receiver<Payload>) {
     let today = Local::now();
     let formatted_date = format!("{}{:02}{:02}", today.year(), today.month(), today.day());
     let mut stock_map: HashMap<String, Model> = HashMap::new();
-    let kproducer = kafka::Producer::new("raspberrypi:9092");
+    let kafka_brokers = std::env::var("KAFKA_BROKERS").unwrap();
+    let kproducer = kafka::Producer::new(kafka_brokers.as_str());
 
     while let Some(payload) = content_rx.recv().await {
         let url = payload.source.clone();
