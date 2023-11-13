@@ -1,4 +1,5 @@
 mod engine;
+mod kafka;
 mod stocks;
 use crate::engine::fetcher::{fetch_content, Payload};
 use crate::engine::model::Model;
@@ -98,6 +99,7 @@ async fn aggregate(mut content_rx: mpsc::Receiver<Payload>) {
     let today = Local::now();
     let formatted_date = format!("{}{:02}{:02}", today.year(), today.month(), today.day());
     let mut stock_map: HashMap<String, Model> = HashMap::new();
+    let kproducer = kafka::Producer::new("raspberrypi:9092");
 
     while let Some(payload) = content_rx.recv().await {
         let url = payload.source.clone();
@@ -128,7 +130,14 @@ async fn aggregate(mut content_rx: mpsc::Receiver<Payload>) {
 
             model.current += 1;
             if model.current == 5 {
-                println!("{}", model.to_json().unwrap());
+                let payload = model.to_json().unwrap();
+                match &kproducer
+                    .send("stakeconcentration-v1".to_string(), payload.clone())
+                    .await
+                {
+                    Ok(_) => println!("{}", payload),
+                    Err(e) => eprintln!("Failed to send message: {}", e),
+                }
             }
         } else if let Err(e) = res {
             eprintln!("Failed to parse content for URL {}: {}", url, e);
