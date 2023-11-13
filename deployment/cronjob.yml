@@ -3,7 +3,7 @@ kind: CronJob
 metadata:
   name: ultron-cronjob
 spec:
-  schedule: "0 18 * * 1-5"  # At 6 PM on every day-of-week from Monday through Friday
+  schedule: "00 10 * * 1-5"  # At 6 PM on every day-of-week from Monday through Friday UTC
   jobTemplate:
     spec:
       template:
