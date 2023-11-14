@@ -1,7 +1,7 @@
+use super::kafka::Producer;
 use crate::engine::fetcher::{fetch_content, Payload};
 use crate::engine::models::concentration::Concentration;
 use crate::engine::parser::{ConcentrationStrategy, Parser};
-use crate::kafka::Producer;
 
 use chrono::{Datelike, Local};
 use std::collections::HashMap;

@@ -20,6 +20,7 @@ serde_json = "1.0"
 once_cell = "1.18"
 dotenv = "0.15.0"
 rdkafka = { version = "0.36", features = ["cmake-build"] }
+clap = { version = "4.4", features = ["derive"] }
 
 [dev-dependencies]
 tokio-test = "0.4"
