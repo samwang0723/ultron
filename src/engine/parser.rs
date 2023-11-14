@@ -76,7 +76,7 @@ impl ConcentrationStrategy {
 impl ParseStrategy for ConcentrationStrategy {
     type Error = anyhow::Error;
     type Input = fetcher::Payload;
-    type Output = model::Concentration;
+    type Output = models::concentration::Temp;
 
     async fn parse(&self, payload: Self::Input) -> Result<Self::Output, Self::Error> {
         let (stock_id, pos) = match self.identifier(payload.source.clone()) {
@@ -116,7 +116,7 @@ impl ParseStrategy for ConcentrationStrategy {
             index += 1;
         }
 
-        Ok(model::Concentration(
+        Ok(models::concentration::Temp(
             stock_id,
             pos,
             total_buy - total_sell,

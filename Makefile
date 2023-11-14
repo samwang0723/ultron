@@ -5,7 +5,7 @@ help: ## show this help
 
 PROJECT_NAME?=core
 APP_NAME?=ultron
-VERSION?=v0.1.0
+VERSION?=v0.2.0
 
 SHELL = /bin/bash
 
