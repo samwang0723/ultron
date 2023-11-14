@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
+use models::concentration;
 use regex::Regex;
 use scraper::{Html, Selector};
 
@@ -76,7 +77,7 @@ impl ConcentrationStrategy {
 impl ParseStrategy for ConcentrationStrategy {
     type Error = anyhow::Error;
     type Input = fetcher::Payload;
-    type Output = models::concentration::Temp;
+    type Output = concentration::Temp;
 
     async fn parse(&self, payload: Self::Input) -> Result<Self::Output, Self::Error> {
         let (stock_id, pos) = match self.identifier(payload.source.clone()) {
@@ -116,7 +117,7 @@ impl ParseStrategy for ConcentrationStrategy {
             index += 1;
         }
 
-        Ok(models::concentration::Temp(
+        Ok(concentration::Temp(
             stock_id,
             pos,
             total_buy - total_sell,
