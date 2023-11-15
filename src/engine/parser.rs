@@ -1,10 +1,9 @@
+use super::*;
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use models::concentration;
 use regex::Regex;
 use scraper::{Html, Selector};
-
-use super::*;
 
 #[async_trait]
 pub trait ParseStrategy: Conversion {
@@ -28,10 +27,23 @@ pub struct DailyCloseStrategy;
 #[async_trait]
 impl ParseStrategy for DailyCloseStrategy {
     type Error = anyhow::Error;
-    type Input = String;
+    type Input = fetcher::Payload;
     type Output = String;
 
-    async fn parse(&self, _payload: Self::Input) -> Result<Self::Output, Self::Error> {
+    async fn parse(&self, payload: Self::Input) -> Result<Self::Output, Self::Error> {
+        let mut rdr = csv::ReaderBuilder::new()
+            .has_headers(false)
+            .delimiter(b',')
+            .flexible(true)
+            .from_reader(payload.content.as_bytes());
+        for result in rdr.records() {
+            match result {
+                Ok(record) => {
+                    println!("{:?}, {}", record, record.len());
+                }
+                Err(e) => println!("Error: {}", e),
+            }
+        }
         Err(anyhow!("DailyCloseStrategy parse not yet implemented"))
     }
 }

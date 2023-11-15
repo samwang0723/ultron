@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
+use encoding_rs::*;
 use once_cell::sync::Lazy;
 use reqwest::StatusCode;
 use tokio::fs;
@@ -67,7 +68,21 @@ impl<'a> Fetch for UrlFetcher<'a> {
                     .map(|v| v.to_str().unwrap_or_default().to_owned())
                     .unwrap_or_default();
 
-                let body = resp.text().await?;
+                // charset checking
+                let mut charset = "utf-8";
+                for (k, v) in resp.headers().iter() {
+                    // check if contains charset=ms950
+                    if k == "content-type" && v.to_str().unwrap_or_default().contains("ms950") {
+                        charset = "big5";
+                        break;
+                    }
+                }
+                let raw_body = resp.bytes().await?;
+                let body = match charset {
+                    "big5" => self.decode_big5(&raw_body)?,
+                    _ => String::from_utf8(raw_body.to_vec()).unwrap(),
+                };
+
                 Ok(Payload {
                     content: body,
                     source: self.0.to_owned(),
@@ -77,6 +92,19 @@ impl<'a> Fetch for UrlFetcher<'a> {
             StatusCode::NOT_FOUND => Err(anyhow!("Not found")),
             _ => Err(anyhow!("Failed to fetch url: {}", self.0)),
         }
+    }
+}
+
+impl UrlFetcher<'_> {
+    fn decode_big5(&self, input: &[u8]) -> Result<String, anyhow::Error> {
+        let (decoded_content, _, had_errors) = BIG5.decode(input);
+        if had_errors {
+            // Handle decoding errors, maybe return a custom error
+            return Err(anyhow!("Decoding error occurred"));
+        }
+
+        let utf8_string = decoded_content.into_owned();
+        Ok(utf8_string)
     }
 }
 

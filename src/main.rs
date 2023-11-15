@@ -20,7 +20,7 @@ async fn main() {
     let args = Args::parse();
     match args.target.as_str() {
         "daily_close" => {
-            // Implement your logic for daily_close here
+            process::daily_close::execute().await;
         }
         "concentration" => {
             // List of URLs to process
