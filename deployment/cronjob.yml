@@ -3,14 +3,68 @@ kind: CronJob
 metadata:
   name: ultron-cronjob
 spec:
-  schedule: "00 10 * * 1-5"  # At 6 PM on every day-of-week from Monday through Friday UTC
+  schedule: "0 10 * * 1-5"  # At 6 PM on every day-of-week from Monday through Friday UTC
   jobTemplate:
     spec:
       template:
         spec:
+          restartPolicy: Never
+          volumes:
+          - name: share
+            emptyDir: {}
+          - name: flags
+            emptyDir: {}
+          initContainers:
+          - name: init
+            image: busybox:musl
+            command: ["cp", "/bin/sh", "/bin/busybox", "/share/"]
+            volumeMounts:
+            - name: share
+              mountPath: /share
           containers:
+          - name: curl
+            image: curlimages/curl:7.78.0
+            command:
+              - /bin/sh
+              - -c
+              - |
+                # test istio-proxy
+                until curl -fsI http://localhost:15021/healthz/ready; do
+                  echo 'Waiting for Sidecar...'
+                  sleep 1
+                done
+                # touch the flag in tmp dir
+                touch /tmp/flags/istio-proxy-ready
+                # then wait for the job to finish
+                until [ -f /tmp/flags/done ]; do
+                  echo 'Waiting for the job to finish...'
+                  sleep 1
+                done
+                # ask istio-proxy to exit
+                curl -fsI -X POST http://localhost:15020/quitquitquit
+            volumeMounts:
+              - name: flags
+                mountPath: /tmp/flags
           - name: ultron
-            image: samwang0723/ultron:v0.1.0
+            image: samwang0723/ultron:v0.2.0
+            command:
+              - /share/sh
+              - -c
+              - |
+                # wait for the flag of istio-proxy
+                until [[ -f /tmp/flags/istio-proxy-ready ]]; do
+                  echo 'Waiting for Sidecar...'
+                  sleep 1
+                done
+                # do the job
+                /ultron --target=concentration
+                # set the flag so curl can shut down istio-proxy
+                /share/busybox touch /tmp/flags/done
+            volumeMounts:
+            - name: share
+              mountPath: /share
+            - name: flags
+              mountPath: /tmp/flags
             env:
             - name: PROXY_USER
               valueFrom:
@@ -27,4 +81,3 @@ spec:
                 secretKeyRef:
                   name: kafka-brokers
                   key: brokers
-          restartPolicy: Never
