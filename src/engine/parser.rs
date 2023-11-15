@@ -1,9 +1,24 @@
+use crate::engine::models::daily_close::DailyClose;
+
 use super::*;
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use models::concentration;
 use regex::Regex;
 use scraper::{Html, Selector};
+
+const TWSE_INDEX: (
+    usize,
+    usize,
+    usize,
+    usize,
+    usize,
+    usize,
+    usize,
+    usize,
+    usize,
+    usize,
+) = (0, 2, 3, 4, 5, 6, 7, 8, 9, 10);
 
 #[async_trait]
 pub trait ParseStrategy: Conversion {
@@ -16,9 +31,24 @@ pub trait ParseStrategy: Conversion {
 }
 
 pub trait Conversion {
-    fn to_i32(&self, data: &str) -> Result<i32, anyhow::Error>;
-    fn to_f32(&self, data: &str) -> Result<f32, anyhow::Error>;
-    fn to_usize(&self, data: &str) -> Result<usize, anyhow::Error>;
+    fn to_i32(&self, data: &str) -> Result<i32, anyhow::Error> {
+        let without_comma = data.replace(',', ""); // This will do nothing if there is no comma
+        without_comma.parse::<i32>().map_err(|e| anyhow!(e))
+    }
+
+    fn to_i64(&self, data: &str) -> Result<i64, anyhow::Error> {
+        let without_comma = data.replace(',', ""); // This will do nothing if there is no comma
+        without_comma.parse::<i64>().map_err(|e| anyhow!(e))
+    }
+
+    fn to_f32(&self, data: &str) -> Result<f32, anyhow::Error> {
+        let without_comma = data.replace(',', ""); // This will do nothing if there is no comma
+        without_comma.parse::<f32>().map_err(|e| anyhow!(e))
+    }
+
+    fn to_usize(&self, data: &str) -> Result<usize, anyhow::Error> {
+        data.parse::<usize>().map_err(|e| anyhow!(e))
+    }
 }
 
 #[derive(Debug)]
@@ -28,9 +58,17 @@ pub struct DailyCloseStrategy;
 impl ParseStrategy for DailyCloseStrategy {
     type Error = anyhow::Error;
     type Input = fetcher::Payload;
-    type Output = String;
+    type Output = Vec<DailyClose>;
 
     async fn parse(&self, payload: Self::Input) -> Result<Self::Output, Self::Error> {
+        let index = match payload.source.contains("twse") {
+            true => TWSE_INDEX,
+            false => {
+                return Err(anyhow!("Cannot identify parse index"));
+            }
+        };
+
+        let mut records: Vec<DailyClose> = Vec::new();
         let mut rdr = csv::ReaderBuilder::new()
             .has_headers(false)
             .delimiter(b',')
@@ -39,26 +77,40 @@ impl ParseStrategy for DailyCloseStrategy {
         for result in rdr.records() {
             match result {
                 Ok(record) => {
-                    println!("{:?}, {}", record, record.len());
+                    if record.len() >= 17 && self.is_integer(&record[index.0]) {
+                        let mut diff = self.to_f32(&record[index.9])?;
+                        if record[index.8].contains('-') {
+                            diff = -diff;
+                        }
+                        // create daily close record
+                        let daily_close = DailyClose {
+                            stock_id: record[index.0].to_string(),
+                            exchange_date: payload.date.clone().unwrap_or_default(),
+                            trade_shares: self.to_i64(&record[index.1])?,
+                            transactions: self.to_i32(&record[index.2])?,
+                            turnover: self.to_i64(&record[index.3])?,
+                            open: self.to_f32(&record[index.4])?,
+                            high: self.to_f32(&record[index.5])?,
+                            low: self.to_f32(&record[index.6])?,
+                            close: self.to_f32(&record[index.7])?,
+                            diff,
+                        };
+                        records.push(daily_close);
+                    }
                 }
                 Err(e) => println!("Error: {}", e),
             }
         }
-        Err(anyhow!("DailyCloseStrategy parse not yet implemented"))
+
+        Ok(records)
     }
 }
 
-impl Conversion for DailyCloseStrategy {
-    fn to_i32(&self, _data: &str) -> Result<i32, anyhow::Error> {
-        Err(anyhow!("DailyCloseStrategy to_i32 not yet implemented"))
-    }
+impl Conversion for DailyCloseStrategy {}
 
-    fn to_f32(&self, _data: &str) -> Result<f32, anyhow::Error> {
-        Err(anyhow!("DailyCloseStrategy to_f32 not yet implemented"))
-    }
-
-    fn to_usize(&self, _data: &str) -> Result<usize, anyhow::Error> {
-        Err(anyhow!("DailyCloseStrategy to_usize not yet implemented"))
+impl DailyCloseStrategy {
+    fn is_integer(&self, s: &str) -> bool {
+        s.parse::<i32>().is_ok()
     }
 }
 
@@ -141,21 +193,7 @@ impl ParseStrategy for ConcentrationStrategy {
     }
 }
 
-impl Conversion for ConcentrationStrategy {
-    fn to_i32(&self, data: &str) -> Result<i32, anyhow::Error> {
-        let without_comma = data.replace(',', ""); // This will do nothing if there is no comma
-        without_comma.parse::<i32>().map_err(|e| anyhow!(e))
-    }
-
-    fn to_f32(&self, data: &str) -> Result<f32, anyhow::Error> {
-        let without_comma = data.replace(',', ""); // This will do nothing if there is no comma
-        without_comma.parse::<f32>().map_err(|e| anyhow!(e))
-    }
-
-    fn to_usize(&self, data: &str) -> Result<usize, anyhow::Error> {
-        data.parse::<usize>().map_err(|e| anyhow!(e))
-    }
-}
+impl Conversion for ConcentrationStrategy {}
 
 #[derive(Debug)]
 pub struct Parser<T: ParseStrategy> {
@@ -181,6 +219,7 @@ mod tests {
     async fn test_concentration_strategy_parse() {
         let strategy = ConcentrationStrategy {};
         let payload = fetcher::Payload {
+            date: None,
             content_type: "text/html".to_string(),
             source: "https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco_2330_2.djhtm".to_string(),
             content: r##"<table class="hasBorder" width="100%" cellspacing="1" cellpadding="0" border="0" bgcolor="#F0F0F0"><TR>

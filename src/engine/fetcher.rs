@@ -26,11 +26,12 @@ static CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
         .expect("Failed to create Client")
 });
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Payload {
     pub content: String,
     pub source: String,
     pub content_type: String,
+    pub date: Option<String>,
 }
 
 #[async_trait]
@@ -87,6 +88,7 @@ impl<'a> Fetch for UrlFetcher<'a> {
                     content: body,
                     source: self.0.to_owned(),
                     content_type,
+                    date: None,
                 })
             }
             StatusCode::NOT_FOUND => Err(anyhow!("Not found")),
@@ -118,6 +120,7 @@ impl<'a> Fetch for FileFetcher<'a> {
             content: body,
             source: self.0.to_owned(),
             content_type: "text/plain".to_owned(),
+            date: None,
         })
     }
 }
