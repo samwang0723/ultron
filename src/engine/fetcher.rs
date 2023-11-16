@@ -73,7 +73,8 @@ impl<'a> Fetch for UrlFetcher<'a> {
                 let mut charset = "utf-8";
                 for (k, v) in resp.headers().iter() {
                     // check if contains charset=ms950
-                    if k == "content-type" && v.to_str().unwrap_or_default().contains("ms950") {
+                    let value = v.to_str().unwrap_or_default();
+                    if k == "content-type" && (value.contains("ms950") || value.contains("csv")) {
                         charset = "big5";
                         break;
                     }

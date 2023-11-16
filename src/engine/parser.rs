@@ -20,6 +20,19 @@ const TWSE_INDEX: (
     usize,
 ) = (0, 2, 3, 4, 5, 6, 7, 8, 9, 10);
 
+const TPEX_INDEX: (
+    usize,
+    usize,
+    usize,
+    usize,
+    usize,
+    usize,
+    usize,
+    usize,
+    usize,
+    usize,
+) = (0, 8, 10, 9, 4, 5, 6, 2, 3, usize::MAX);
+
 #[async_trait]
 pub trait ParseStrategy: Conversion {
     type Error;
@@ -32,22 +45,22 @@ pub trait ParseStrategy: Conversion {
 
 pub trait Conversion {
     fn to_i32(&self, data: &str) -> Result<i32, anyhow::Error> {
-        let without_comma = data.replace(',', ""); // This will do nothing if there is no comma
+        let without_comma = data.trim().replace(',', ""); // This will do nothing if there is no comma
         without_comma.parse::<i32>().map_err(|e| anyhow!(e))
     }
 
     fn to_i64(&self, data: &str) -> Result<i64, anyhow::Error> {
-        let without_comma = data.replace(',', ""); // This will do nothing if there is no comma
+        let without_comma = data.trim().replace(',', ""); // This will do nothing if there is no comma
         without_comma.parse::<i64>().map_err(|e| anyhow!(e))
     }
 
     fn to_f32(&self, data: &str) -> Result<f32, anyhow::Error> {
-        let without_comma = data.replace(',', ""); // This will do nothing if there is no comma
+        let without_comma = data.trim().replace(',', ""); // This will do nothing if there is no comma
         without_comma.parse::<f32>().map_err(|e| anyhow!(e))
     }
 
     fn to_usize(&self, data: &str) -> Result<usize, anyhow::Error> {
-        data.parse::<usize>().map_err(|e| anyhow!(e))
+        data.trim().parse::<usize>().map_err(|e| anyhow!(e))
     }
 }
 
@@ -61,11 +74,12 @@ impl ParseStrategy for DailyCloseStrategy {
     type Output = Vec<DailyClose>;
 
     async fn parse(&self, payload: Self::Input) -> Result<Self::Output, Self::Error> {
-        let index = match payload.source.contains("twse") {
-            true => TWSE_INDEX,
-            false => {
-                return Err(anyhow!("Cannot identify parse index"));
-            }
+        let index = if payload.source.contains("twse") {
+            TWSE_INDEX
+        } else if payload.source.contains("tpex") {
+            TPEX_INDEX
+        } else {
+            return Err(anyhow!("Cannot identify parse index"));
         };
 
         let mut records: Vec<DailyClose> = Vec::new();
@@ -78,10 +92,28 @@ impl ParseStrategy for DailyCloseStrategy {
             match result {
                 Ok(record) => {
                     if record.len() >= 17 && self.is_integer(&record[index.0]) {
-                        let mut diff = self.to_f32(&record[index.9])?;
-                        if record[index.8].contains('-') {
-                            diff = -diff;
+                        // skip if no valid data
+                        if !self.valid(&record[index.4])
+                            || !self.valid(&record[index.5])
+                            || !self.valid(&record[index.6])
+                            || !self.valid(&record[index.7])
+                            || !self.valid(&record[index.8])
+                        {
+                            continue;
                         }
+
+                        // because TPEX is combining +/- and num in one field
+                        // need to skip the 9th index here.
+                        let diff: f32 = if index.9 == usize::MAX {
+                            self.to_f32(&record[index.8])?
+                        } else {
+                            let mut t = self.to_f32(&record[index.9])?;
+                            if record[index.8].contains('-') {
+                                t = -t;
+                            };
+                            t
+                        };
+
                         // create daily close record
                         let daily_close = DailyClose {
                             stock_id: record[index.0].to_string(),
@@ -110,7 +142,11 @@ impl Conversion for DailyCloseStrategy {}
 
 impl DailyCloseStrategy {
     fn is_integer(&self, s: &str) -> bool {
-        s.parse::<i32>().is_ok()
+        s.parse::<i32>().is_ok() && s.len() == 4
+    }
+
+    fn valid(&self, s: &str) -> bool {
+        !s.is_empty() && s != "---"
     }
 }
 
