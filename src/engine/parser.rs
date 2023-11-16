@@ -1,146 +1,82 @@
-use crate::engine::models::daily_close::DailyClose;
+use crate::engine::models::daily_close::*;
 
 use super::*;
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
+use csv::StringRecord;
 use models::concentration;
 use regex::Regex;
 use scraper::{Html, Selector};
-
-const TWSE_INDEX: (
-    usize,
-    usize,
-    usize,
-    usize,
-    usize,
-    usize,
-    usize,
-    usize,
-    usize,
-    usize,
-) = (0, 2, 3, 4, 5, 6, 7, 8, 9, 10);
-
-const TPEX_INDEX: (
-    usize,
-    usize,
-    usize,
-    usize,
-    usize,
-    usize,
-    usize,
-    usize,
-    usize,
-    usize,
-) = (0, 8, 10, 9, 4, 5, 6, 2, 3, usize::MAX);
+use std::fmt::Display;
+use std::str::FromStr;
 
 #[async_trait]
 pub trait ParseStrategy: Conversion {
     type Error;
     type Input;
-    // Declare an associated type that will be the return type of the parse method.
-    type Output;
+    type Output; // Declare an associated type that will be the return type of the parse method.
 
     async fn parse(&self, payload: Self::Input) -> Result<Self::Output, Self::Error>;
 }
 
 pub trait Conversion {
-    fn to_i32(&self, data: &str) -> Result<i32, anyhow::Error> {
-        let without_comma = data.trim().replace(',', ""); // This will do nothing if there is no comma
-        without_comma.parse::<i32>().map_err(|e| anyhow!(e))
-    }
-
-    fn to_i64(&self, data: &str) -> Result<i64, anyhow::Error> {
-        let without_comma = data.trim().replace(',', ""); // This will do nothing if there is no comma
-        without_comma.parse::<i64>().map_err(|e| anyhow!(e))
-    }
-
-    fn to_f32(&self, data: &str) -> Result<f32, anyhow::Error> {
-        let without_comma = data.trim().replace(',', ""); // This will do nothing if there is no comma
-        without_comma.parse::<f32>().map_err(|e| anyhow!(e))
-    }
-
-    fn to_usize(&self, data: &str) -> Result<usize, anyhow::Error> {
-        data.trim().parse::<usize>().map_err(|e| anyhow!(e))
+    fn parse_with_comma<T: FromStr>(&self, data: &str) -> Result<T>
+    where
+        T::Err: Display,
+    {
+        let without_comma = data.trim().replace(',', "");
+        without_comma
+            .parse::<T>()
+            .map_err(|e| anyhow!("Failed to parse {}: {}", without_comma, e))
     }
 }
 
 #[derive(Debug)]
 pub struct DailyCloseStrategy;
 
-#[async_trait]
-impl ParseStrategy for DailyCloseStrategy {
-    type Error = anyhow::Error;
-    type Input = fetcher::Payload;
-    type Output = Vec<DailyClose>;
-
-    async fn parse(&self, payload: Self::Input) -> Result<Self::Output, Self::Error> {
-        let index = if payload.source.contains("twse") {
-            TWSE_INDEX
-        } else if payload.source.contains("tpex") {
-            TPEX_INDEX
-        } else {
-            return Err(anyhow!("Cannot identify parse index"));
-        };
-
-        let mut records: Vec<DailyClose> = Vec::new();
-        let mut rdr = csv::ReaderBuilder::new()
-            .has_headers(false)
-            .delimiter(b',')
-            .flexible(true)
-            .from_reader(payload.content.as_bytes());
-        for result in rdr.records() {
-            match result {
-                Ok(record) => {
-                    if record.len() >= 17 && self.is_integer(&record[index.0]) {
-                        // skip if no valid data
-                        if !self.valid(&record[index.4])
-                            || !self.valid(&record[index.5])
-                            || !self.valid(&record[index.6])
-                            || !self.valid(&record[index.7])
-                            || !self.valid(&record[index.8])
-                        {
-                            continue;
-                        }
-
-                        // because TPEX is combining +/- and num in one field
-                        // need to skip the 9th index here.
-                        let diff: f32 = if index.9 == usize::MAX {
-                            self.to_f32(&record[index.8])?
-                        } else {
-                            let mut t = self.to_f32(&record[index.9])?;
-                            if record[index.8].contains('-') {
-                                t = -t;
-                            };
-                            t
-                        };
-
-                        // create daily close record
-                        let daily_close = DailyClose {
-                            stock_id: record[index.0].to_string(),
-                            exchange_date: payload.date.clone().unwrap_or_default(),
-                            trade_shares: self.to_i64(&record[index.1])?,
-                            transactions: self.to_i32(&record[index.2])?,
-                            turnover: self.to_i64(&record[index.3])?,
-                            open: self.to_f32(&record[index.4])?,
-                            high: self.to_f32(&record[index.5])?,
-                            low: self.to_f32(&record[index.6])?,
-                            close: self.to_f32(&record[index.7])?,
-                            diff,
-                        };
-                        records.push(daily_close);
-                    }
-                }
-                Err(e) => println!("Error: {}", e),
-            }
-        }
-
-        Ok(records)
-    }
-}
-
 impl Conversion for DailyCloseStrategy {}
 
 impl DailyCloseStrategy {
+    fn is_valid_record(&self, record: &StringRecord, index_set: &IndexSet) -> bool {
+        record.len() >= 17
+            && self.is_integer(&record[index_set.stock_id])
+            && [
+                index_set.open,
+                index_set.high,
+                index_set.low,
+                index_set.close,
+                index_set.diff,
+            ]
+            .iter()
+            .all(|&index| self.valid(&record[index]))
+    }
+
+    fn parse_record(
+        &self,
+        record: &StringRecord,
+        index_set: &IndexSet,
+        date: &Option<String>,
+    ) -> Result<DailyClose> {
+        let diff = self.parse_with_comma::<f32>(&record[index_set.diff])?;
+        let diff = match index_set.diff_sign {
+            Some(index) if record[index].contains('-') => -diff,
+            _ => diff,
+        };
+
+        Ok(DailyClose {
+            stock_id: record[index_set.stock_id].to_string(),
+            exchange_date: date.clone().unwrap_or_default(),
+            trade_shares: self.parse_with_comma::<i64>(&record[index_set.trade_shares])?,
+            transactions: self.parse_with_comma::<i32>(&record[index_set.transactions])?,
+            turnover: self.parse_with_comma::<i64>(&record[index_set.turnover])?,
+            open: self.parse_with_comma::<f32>(&record[index_set.open])?,
+            high: self.parse_with_comma::<f32>(&record[index_set.high])?,
+            low: self.parse_with_comma::<f32>(&record[index_set.low])?,
+            close: self.parse_with_comma::<f32>(&record[index_set.close])?,
+            diff,
+        })
+    }
+
     fn is_integer(&self, s: &str) -> bool {
         s.parse::<i32>().is_ok() && s.len() == 4
     }
@@ -150,21 +86,53 @@ impl DailyCloseStrategy {
     }
 }
 
+#[async_trait]
+impl ParseStrategy for DailyCloseStrategy {
+    type Error = anyhow::Error;
+    type Input = fetcher::Payload;
+    type Output = Vec<DailyClose>;
+
+    async fn parse(&self, payload: Self::Input) -> Result<Self::Output, Self::Error> {
+        let index_set = if payload.source.contains("twse") {
+            IndexSet::new_twse()
+        } else if payload.source.contains("tpex") {
+            IndexSet::new_tpex()
+        } else {
+            return Err(anyhow!("Cannot identify parse index"));
+        };
+
+        let mut rdr = csv::ReaderBuilder::new()
+            .has_headers(false)
+            .delimiter(b',')
+            .flexible(true)
+            .from_reader(payload.content.as_bytes());
+
+        let records = rdr
+            .records()
+            .filter_map(|result| result.ok())
+            .filter(|record| self.is_valid_record(record, &index_set))
+            .filter_map(|record| self.parse_record(&record, &index_set, &payload.date).ok())
+            .collect();
+
+        Ok(records)
+    }
+}
+
 #[derive(Debug)]
 pub struct ConcentrationStrategy;
 
+impl Conversion for ConcentrationStrategy {}
+
 impl ConcentrationStrategy {
-    fn identifier(&self, url: String) -> Result<(String, usize), anyhow::Error> {
+    fn identifier(&self, url: &str) -> Result<(String, usize), anyhow::Error> {
         let re = Regex::new(r"zco_(\d+)_(\d+)")?;
-        let captures = match re.captures(&url) {
-            Some(captures) => captures,
-            None => {
-                return Err(anyhow!("Invalid URL"));
-            }
-        };
+        let captures = re.captures(url).ok_or_else(|| anyhow!("Invalid URL"))?;
 
         let stock_id = captures.get(1).map_or("", |m| m.as_str());
-        let index = self.to_usize(captures.get(2).map_or("", |m| m.as_str()))?;
+        let index = captures
+            .get(2)
+            .map_or(Ok(0), |m| m.as_str().parse::<usize>())
+            .map_err(|_| anyhow!("Failed to parse index"))?;
 
         // backfill the missing index 4 (40 days replaced with 60 days)
         let pos = if index == 6 { index - 2 } else { index - 1 };
@@ -180,42 +148,25 @@ impl ParseStrategy for ConcentrationStrategy {
     type Output = concentration::Temp;
 
     async fn parse(&self, payload: Self::Input) -> Result<Self::Output, Self::Error> {
-        let (stock_id, pos) = match self.identifier(payload.source.clone()) {
-            Ok((stock_id, pos)) => (stock_id, pos),
-            Err(e) => {
-                return Err(anyhow!("Failed to parse URL: {}", e));
-            }
-        };
+        let (stock_id, pos) = self.identifier(&payload.source)?;
 
-        let document = Html::parse_document(payload.content.as_str());
-        let selector = match Selector::parse("td.t3n1[colspan]") {
-            Ok(selector) => selector,
-            Err(e) => {
-                return Err(anyhow!("Failed to create selector: {}", e));
-            }
-        };
+        let document = Html::parse_document(&payload.content);
+        let selector = Selector::parse("td.t3n1[colspan='4']")
+            .map_err(|e| anyhow!("Failed to create selector: {}", e))?;
 
-        let mut index: usize = 0;
-        let mut total_buy = 0;
-        let mut total_sell = 0;
-        let mut avg_buy_price: f32 = 0.0;
-        let mut avg_sell_price: f32 = 0.0;
-        for element in document.select(&selector) {
-            if let Some(colspan) = element.value().attr("colspan") {
-                if colspan != "4" {
-                    continue;
-                }
-            }
-            let text = element.text().collect::<Vec<_>>().join("");
-            match index {
-                0 => total_buy = self.to_i32(&text)?,
-                1 => total_sell = self.to_i32(&text)?,
-                2 => avg_buy_price = self.to_f32(&text)?,
-                3 => avg_sell_price = self.to_f32(&text)?,
-                _ => {}
-            }
-            index += 1;
+        let values = document
+            .select(&selector)
+            .filter_map(|element| element.text().next())
+            .collect::<Vec<_>>();
+
+        if values.len() != 4 {
+            return Err(anyhow!("Expected 4 values, found {}", values.len()));
         }
+
+        let total_buy = self.parse_with_comma::<i32>(values[0])?;
+        let total_sell = self.parse_with_comma::<i32>(values[1])?;
+        let avg_buy_price = self.parse_with_comma::<f32>(values[2])?;
+        let avg_sell_price = self.parse_with_comma::<f32>(values[3])?;
 
         Ok(concentration::Temp(
             stock_id,
@@ -228,8 +179,6 @@ impl ParseStrategy for ConcentrationStrategy {
         ))
     }
 }
-
-impl Conversion for ConcentrationStrategy {}
 
 #[derive(Debug)]
 pub struct Parser<T: ParseStrategy> {

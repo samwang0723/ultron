@@ -69,20 +69,23 @@ impl<'a> Fetch for UrlFetcher<'a> {
                     .map(|v| v.to_str().unwrap_or_default().to_owned())
                     .unwrap_or_default();
 
-                // charset checking
-                let mut charset = "utf-8";
-                for (k, v) in resp.headers().iter() {
-                    // check if contains charset=ms950
-                    let value = v.to_str().unwrap_or_default();
-                    if k == "content-type" && (value.contains("ms950") || value.contains("csv")) {
-                        charset = "big5";
-                        break;
-                    }
-                }
+                // Charset checking
+                let charset = if ["ms950", "big5", "csv"]
+                    .iter()
+                    .any(|&s| content_type.contains(s))
+                {
+                    "big5"
+                } else {
+                    "utf-8"
+                };
+
                 let raw_body = resp.bytes().await?;
-                let body = match charset {
-                    "big5" => self.decode_big5(&raw_body)?,
-                    _ => String::from_utf8(raw_body.to_vec()).unwrap(),
+                let body = if charset == "big5" {
+                    self.decode_big5(&raw_body)?
+                } else {
+                    // Safely handle potential UTF-8 conversion errors
+                    String::from_utf8(raw_body.to_vec())
+                        .map_err(|e| anyhow!("Failed to decode UTF-8: {}", e))?
                 };
 
                 Ok(Payload {

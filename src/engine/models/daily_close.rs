@@ -1,6 +1,51 @@
 use serde::Serialize;
 use serde_json;
 
+pub struct IndexSet {
+    pub stock_id: usize,
+    pub trade_shares: usize,
+    pub transactions: usize,
+    pub turnover: usize,
+    pub open: usize,
+    pub high: usize,
+    pub low: usize,
+    pub close: usize,
+    pub diff: usize,
+    pub diff_sign: Option<usize>,
+}
+
+impl IndexSet {
+    pub fn new_twse() -> Self {
+        Self {
+            stock_id: 0,
+            trade_shares: 2,
+            transactions: 3,
+            turnover: 4,
+            open: 5,
+            high: 6,
+            low: 7,
+            close: 8,
+            diff: 10,
+            diff_sign: Some(9),
+        }
+    }
+
+    pub fn new_tpex() -> Self {
+        Self {
+            stock_id: 0,
+            trade_shares: 8,
+            transactions: 10,
+            turnover: 9,
+            open: 4,
+            high: 5,
+            low: 6,
+            close: 2,
+            diff: 3,
+            diff_sign: None,
+        }
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct DailyClose {
     #[serde(rename = "stockId")]
