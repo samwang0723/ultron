@@ -313,6 +313,22 @@ mod tests {
     }
 
     #[test]
+    fn test_concentration_strategy_to_i64() {
+        let strategy = ConcentrationStrategy {};
+        let result = strategy.to_i64("1,845,919");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 1845919);
+    }
+
+    #[test]
+    fn test_concentration_strategy_to_f32() {
+        let strategy = ConcentrationStrategy {};
+        let result = strategy.to_f32("-1.05 ");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), -1.05);
+    }
+
+    #[test]
     fn test_concentration_strategy_to_usize() {
         let strategy = ConcentrationStrategy {};
         let result = strategy.to_usize("2");
