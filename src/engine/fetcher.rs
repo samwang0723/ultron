@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
+use encoding_rs::*;
 use once_cell::sync::Lazy;
 use reqwest::StatusCode;
 use tokio::fs;
@@ -25,11 +26,12 @@ static CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
         .expect("Failed to create Client")
 });
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Payload {
     pub content: String,
     pub source: String,
     pub content_type: String,
+    pub date: Option<String>,
 }
 
 #[async_trait]
@@ -67,16 +69,48 @@ impl<'a> Fetch for UrlFetcher<'a> {
                     .map(|v| v.to_str().unwrap_or_default().to_owned())
                     .unwrap_or_default();
 
-                let body = resp.text().await?;
+                // Charset checking
+                let charset = if ["ms950", "big5", "csv"]
+                    .iter()
+                    .any(|&s| content_type.contains(s))
+                {
+                    "big5"
+                } else {
+                    "utf-8"
+                };
+
+                let raw_body = resp.bytes().await?;
+                let body = if charset == "big5" {
+                    self.decode_big5(&raw_body)?
+                } else {
+                    // Safely handle potential UTF-8 conversion errors
+                    String::from_utf8(raw_body.to_vec())
+                        .map_err(|e| anyhow!("Failed to decode UTF-8: {}", e))?
+                };
+
                 Ok(Payload {
                     content: body,
                     source: self.0.to_owned(),
                     content_type,
+                    date: None,
                 })
             }
             StatusCode::NOT_FOUND => Err(anyhow!("Not found")),
             _ => Err(anyhow!("Failed to fetch url: {}", self.0)),
         }
+    }
+}
+
+impl UrlFetcher<'_> {
+    fn decode_big5(&self, input: &[u8]) -> Result<String, anyhow::Error> {
+        let (decoded_content, _, had_errors) = BIG5.decode(input);
+        if had_errors {
+            // Handle decoding errors, maybe return a custom error
+            return Err(anyhow!("Decoding error occurred"));
+        }
+
+        let utf8_string = decoded_content.into_owned();
+        Ok(utf8_string)
     }
 }
 
@@ -90,6 +124,7 @@ impl<'a> Fetch for FileFetcher<'a> {
             content: body,
             source: self.0.to_owned(),
             content_type: "text/plain".to_owned(),
+            date: None,
         })
     }
 }

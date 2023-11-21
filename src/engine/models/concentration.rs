@@ -2,7 +2,7 @@ use serde::Serialize;
 use serde_json;
 
 #[derive(Debug, Serialize)]
-pub struct Model {
+pub struct Concentration {
     #[serde(rename = "stockId")]
     pub stock_id: String,
 
@@ -28,7 +28,7 @@ pub struct Model {
     pub current: usize,
 }
 
-impl Model {
+impl Concentration {
     // Define a method to convert the struct into a JSON string
     pub fn to_json(&self) -> Result<String, serde_json::Error> {
         serde_json::to_string(&self)
@@ -36,7 +36,7 @@ impl Model {
 }
 
 #[derive(Debug)]
-pub struct Concentration(
+pub struct Temp(
     pub String,
     pub usize,
     pub i32,
@@ -53,7 +53,7 @@ mod tests {
 
     #[test]
     fn test_model_to_json() {
-        let model = Model {
+        let model = Concentration {
             stock_id: String::from("AAPL"),
             exchange_date: String::from("2020-01-01"),
             concentration: vec![1, 2, 3],

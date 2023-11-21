@@ -1,69 +1,138 @@
-use anyhow::{anyhow, Result};
-use async_trait::async_trait;
-use regex::Regex;
-use scraper::{Html, Selector};
+use crate::engine::models::daily_close::*;
 
 use super::*;
+use anyhow::{anyhow, Result};
+use async_trait::async_trait;
+use csv::StringRecord;
+use models::concentration;
+use regex::Regex;
+use scraper::{Html, Selector};
+use std::fmt::Display;
+use std::str::FromStr;
 
 #[async_trait]
 pub trait ParseStrategy: Conversion {
     type Error;
     type Input;
-    // Declare an associated type that will be the return type of the parse method.
-    type Output;
+    type Output; // Declare an associated type that will be the return type of the parse method.
 
     async fn parse(&self, payload: Self::Input) -> Result<Self::Output, Self::Error>;
 }
 
 pub trait Conversion {
-    fn to_i32(&self, data: &str) -> Result<i32, anyhow::Error>;
-    fn to_f32(&self, data: &str) -> Result<f32, anyhow::Error>;
-    fn to_usize(&self, data: &str) -> Result<usize, anyhow::Error>;
+    fn parse_with_comma<T: FromStr>(&self, data: &str) -> Result<T>
+    where
+        T::Err: Display,
+    {
+        let without_comma = data.trim().replace(',', "");
+        without_comma
+            .parse::<T>()
+            .map_err(|e| anyhow!("Failed to parse {}: {}", without_comma, e))
+    }
 }
 
 #[derive(Debug)]
 pub struct DailyCloseStrategy;
 
-#[async_trait]
-impl ParseStrategy for DailyCloseStrategy {
-    type Error = anyhow::Error;
-    type Input = String;
-    type Output = String;
+impl Conversion for DailyCloseStrategy {}
 
-    async fn parse(&self, _payload: Self::Input) -> Result<Self::Output, Self::Error> {
-        Err(anyhow!("DailyCloseStrategy parse not yet implemented"))
+impl DailyCloseStrategy {
+    fn is_valid_record(&self, record: &StringRecord, index_set: &IndexSet) -> bool {
+        record.len() >= 17
+            && self.is_integer(&record[index_set.stock_id])
+            && [
+                index_set.open,
+                index_set.high,
+                index_set.low,
+                index_set.close,
+                index_set.diff,
+            ]
+            .iter()
+            .all(|&index| self.valid(&record[index]))
+    }
+
+    fn parse_record(
+        &self,
+        record: &StringRecord,
+        index_set: &IndexSet,
+        date: &Option<String>,
+    ) -> Result<DailyClose> {
+        let diff = self.parse_with_comma::<f32>(&record[index_set.diff])?;
+        let diff = match index_set.diff_sign {
+            Some(index) if record[index].contains('-') => -diff,
+            _ => diff,
+        };
+
+        Ok(DailyClose {
+            stock_id: record[index_set.stock_id].to_string(),
+            exchange_date: date.clone().unwrap_or_default(),
+            trade_shares: self.parse_with_comma::<i64>(&record[index_set.trade_shares])?,
+            transactions: self.parse_with_comma::<i32>(&record[index_set.transactions])?,
+            turnover: self.parse_with_comma::<i64>(&record[index_set.turnover])?,
+            open: self.parse_with_comma::<f32>(&record[index_set.open])?,
+            high: self.parse_with_comma::<f32>(&record[index_set.high])?,
+            low: self.parse_with_comma::<f32>(&record[index_set.low])?,
+            close: self.parse_with_comma::<f32>(&record[index_set.close])?,
+            diff,
+        })
+    }
+
+    fn is_integer(&self, s: &str) -> bool {
+        s.parse::<i32>().is_ok() && s.len() == 4
+    }
+
+    fn valid(&self, s: &str) -> bool {
+        !s.is_empty() && s != "---"
     }
 }
 
-impl Conversion for DailyCloseStrategy {
-    fn to_i32(&self, _data: &str) -> Result<i32, anyhow::Error> {
-        Err(anyhow!("DailyCloseStrategy to_i32 not yet implemented"))
-    }
+#[async_trait]
+impl ParseStrategy for DailyCloseStrategy {
+    type Error = anyhow::Error;
+    type Input = fetcher::Payload;
+    type Output = Vec<DailyClose>;
 
-    fn to_f32(&self, _data: &str) -> Result<f32, anyhow::Error> {
-        Err(anyhow!("DailyCloseStrategy to_f32 not yet implemented"))
-    }
+    async fn parse(&self, payload: Self::Input) -> Result<Self::Output, Self::Error> {
+        let index_set = if payload.source.contains("twse") {
+            IndexSet::new_twse()
+        } else if payload.source.contains("tpex") {
+            IndexSet::new_tpex()
+        } else {
+            return Err(anyhow!("Cannot identify parse index"));
+        };
 
-    fn to_usize(&self, _data: &str) -> Result<usize, anyhow::Error> {
-        Err(anyhow!("DailyCloseStrategy to_usize not yet implemented"))
+        let mut rdr = csv::ReaderBuilder::new()
+            .has_headers(false)
+            .delimiter(b',')
+            .flexible(true)
+            .from_reader(payload.content.as_bytes());
+
+        let records = rdr
+            .records()
+            .filter_map(|result| result.ok())
+            .filter(|record| self.is_valid_record(record, &index_set))
+            .filter_map(|record| self.parse_record(&record, &index_set, &payload.date).ok())
+            .collect();
+
+        Ok(records)
     }
 }
 
 #[derive(Debug)]
 pub struct ConcentrationStrategy;
 
+impl Conversion for ConcentrationStrategy {}
+
 impl ConcentrationStrategy {
-    fn identifier(&self, url: String) -> Result<(String, usize), anyhow::Error> {
+    fn identifier(&self, url: &str) -> Result<(String, usize), anyhow::Error> {
         let re = Regex::new(r"zco_(\d+)_(\d+)")?;
-        let captures = match re.captures(&url) {
-            Some(captures) => captures,
-            None => {
-                return Err(anyhow!("Invalid URL"));
-            }
-        };
+        let captures = re.captures(url).ok_or_else(|| anyhow!("Invalid URL"))?;
 
         let stock_id = captures.get(1).map_or("", |m| m.as_str());
-        let index = self.to_usize(captures.get(2).map_or("", |m| m.as_str()))?;
+        let index = captures
+            .get(2)
+            .map_or(Ok(0), |m| m.as_str().parse::<usize>())
+            .map_err(|_| anyhow!("Failed to parse index"))?;
 
         // backfill the missing index 4 (40 days replaced with 60 days)
         let pos = if index == 6 { index - 2 } else { index - 1 };
@@ -76,47 +145,30 @@ impl ConcentrationStrategy {
 impl ParseStrategy for ConcentrationStrategy {
     type Error = anyhow::Error;
     type Input = fetcher::Payload;
-    type Output = model::Concentration;
+    type Output = concentration::Temp;
 
     async fn parse(&self, payload: Self::Input) -> Result<Self::Output, Self::Error> {
-        let (stock_id, pos) = match self.identifier(payload.source.clone()) {
-            Ok((stock_id, pos)) => (stock_id, pos),
-            Err(e) => {
-                return Err(anyhow!("Failed to parse URL: {}", e));
-            }
-        };
+        let (stock_id, pos) = self.identifier(&payload.source)?;
 
-        let document = Html::parse_document(payload.content.as_str());
-        let selector = match Selector::parse("td.t3n1[colspan]") {
-            Ok(selector) => selector,
-            Err(e) => {
-                return Err(anyhow!("Failed to create selector: {}", e));
-            }
-        };
+        let document = Html::parse_document(&payload.content);
+        let selector = Selector::parse("td.t3n1[colspan='4']")
+            .map_err(|e| anyhow!("Failed to create selector: {}", e))?;
 
-        let mut index: usize = 0;
-        let mut total_buy = 0;
-        let mut total_sell = 0;
-        let mut avg_buy_price: f32 = 0.0;
-        let mut avg_sell_price: f32 = 0.0;
-        for element in document.select(&selector) {
-            if let Some(colspan) = element.value().attr("colspan") {
-                if colspan != "4" {
-                    continue;
-                }
-            }
-            let text = element.text().collect::<Vec<_>>().join("");
-            match index {
-                0 => total_buy = self.to_i32(&text)?,
-                1 => total_sell = self.to_i32(&text)?,
-                2 => avg_buy_price = self.to_f32(&text)?,
-                3 => avg_sell_price = self.to_f32(&text)?,
-                _ => {}
-            }
-            index += 1;
+        let values = document
+            .select(&selector)
+            .filter_map(|element| element.text().next())
+            .collect::<Vec<_>>();
+
+        if values.len() != 4 {
+            return Err(anyhow!("Expected 4 values, found {}", values.len()));
         }
 
-        Ok(model::Concentration(
+        let total_buy = self.parse_with_comma::<i32>(values[0])?;
+        let total_sell = self.parse_with_comma::<i32>(values[1])?;
+        let avg_buy_price = self.parse_with_comma::<f32>(values[2])?;
+        let avg_sell_price = self.parse_with_comma::<f32>(values[3])?;
+
+        Ok(concentration::Temp(
             stock_id,
             pos,
             total_buy - total_sell,
@@ -125,22 +177,6 @@ impl ParseStrategy for ConcentrationStrategy {
             avg_buy_price,
             avg_sell_price,
         ))
-    }
-}
-
-impl Conversion for ConcentrationStrategy {
-    fn to_i32(&self, data: &str) -> Result<i32, anyhow::Error> {
-        let without_comma = data.replace(',', ""); // This will do nothing if there is no comma
-        without_comma.parse::<i32>().map_err(|e| anyhow!(e))
-    }
-
-    fn to_f32(&self, data: &str) -> Result<f32, anyhow::Error> {
-        let without_comma = data.replace(',', ""); // This will do nothing if there is no comma
-        without_comma.parse::<f32>().map_err(|e| anyhow!(e))
-    }
-
-    fn to_usize(&self, data: &str) -> Result<usize, anyhow::Error> {
-        data.parse::<usize>().map_err(|e| anyhow!(e))
     }
 }
 
@@ -168,6 +204,7 @@ mod tests {
     async fn test_concentration_strategy_parse() {
         let strategy = ConcentrationStrategy {};
         let payload = fetcher::Payload {
+            date: None,
             content_type: "text/html".to_string(),
             source: "https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco_2330_2.djhtm".to_string(),
             content: r##"<table class="hasBorder" width="100%" cellspacing="1" cellpadding="0" border="0" bgcolor="#F0F0F0"><TR>
@@ -222,6 +259,22 @@ mod tests {
         let result = strategy.to_i32("1,845,919");
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), 1845919);
+    }
+
+    #[test]
+    fn test_concentration_strategy_to_i64() {
+        let strategy = ConcentrationStrategy {};
+        let result = strategy.to_i64("1,845,919");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 1845919);
+    }
+
+    #[test]
+    fn test_concentration_strategy_to_f32() {
+        let strategy = ConcentrationStrategy {};
+        let result = strategy.to_f32("-1.05 ");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), -1.05);
     }
 
     #[test]
