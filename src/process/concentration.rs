@@ -11,6 +11,20 @@ use tokio::sync::{mpsc, Semaphore};
 static CONCENTRATION_PAGES: usize = 5;
 
 pub async fn execute(stocks: Vec<String>) {
+    let today = Local::now();
+    let formatted_date = format!("{}{:02}{:02}", today.year(), today.month(), today.day());
+
+    // If formatted date in array, skip
+    let skipped_dates = vec![
+        "20240101", "20240206", "20240207", "20240208", "20240209", "20240212", "20240213",
+        "20240214", "20240228", "20240404", "20240405", "20240501", "20240610", "20240917",
+        "20241010",
+    ];
+    if skipped_dates.contains(&formatted_date.as_str()) {
+        println!("Skipped date: {}", formatted_date);
+        return;
+    }
+
     let capacity = stocks.len() * CONCENTRATION_PAGES;
     let (url_tx, url_rx) = mpsc::channel(capacity);
 
@@ -83,17 +97,6 @@ async fn fetch_urls(mut url_rx: mpsc::Receiver<String>, capacity: usize) {
 async fn aggregate(mut content_rx: mpsc::Receiver<Payload>) {
     let today = Local::now();
     let formatted_date = format!("{}{:02}{:02}", today.year(), today.month(), today.day());
-
-    // If formatted date in array, skip
-    let skipped_dates = vec![
-        "20240101", "20240206", "20240207", "20240208", "20240209", "20240212", "20240213",
-        "20240214", "20240228", "20240404", "20240405", "20240501", "20240610", "20240917",
-        "20241010",
-    ];
-    if skipped_dates.contains(&formatted_date.as_str()) {
-        return;
-    }
-
     let mut stock_map: HashMap<String, Concentration> = HashMap::new();
     let kafka_brokers = std::env::var("KAFKA_BROKERS").unwrap();
     let kproducer = Producer::new(kafka_brokers.as_str());
