@@ -67,18 +67,15 @@ spec:
             - name: flags
               mountPath: /tmp/flags
             env:
-            - name: PROXY_USER
-              valueFrom:
-                secretKeyRef:
-                  name: proxy-secret
-                  key: username
+            - name: ENV
+              value: prod
             - name: PROXY_PASSWD
               valueFrom:
                 secretKeyRef:
                   name: proxy-secret
                   key: passwd
-            - name: KAFKA_BROKERS
+            - name: DB_PASSWD
               valueFrom:
                 secretKeyRef:
-                  name: kafka-brokers
-                  key: brokers
+                  name: db-secret
+                  key: passwd

@@ -1,0 +1,11 @@
+database:
+  host: "localhost"
+  port: "5432"
+  user: "jarvis_app"
+  dbname: "jarvis_main"
+kafka:
+  brokers: "localhost:9092"
+proxy:
+  host: "gate.smartproxy.com"
+  port: "7000"
+  username: "spganduwv8"

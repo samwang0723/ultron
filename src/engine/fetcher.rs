@@ -5,6 +5,8 @@ use once_cell::sync::Lazy;
 use reqwest::StatusCode;
 use tokio::fs;
 
+use crate::config::setting::SETTINGS;
+
 #[cfg(feature = "testing")]
 static CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
     reqwest::Client::builder()
@@ -14,14 +16,24 @@ static CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
 
 // Define a static instance of `Client` which will be initialized on the first use
 #[cfg(not(feature = "testing"))]
-static CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
-    let account = std::env::var("PROXY_USER").unwrap();
-    let password = std::env::var("PROXY_PASSWD").unwrap();
-    let proxy_url = format!("http://{}:{}@gate.smartproxy.com:7000", account, password);
+static PROXY_CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
+    let proxy_settings = &SETTINGS.proxy;
+    let proxy_url = format!(
+        "http://{}:{}@{}:{}",
+        proxy_settings.username, proxy_settings.passwd, proxy_settings.host, proxy_settings.port
+    );
+
     let proxy = reqwest::Proxy::https(proxy_url).expect("Failed to create proxy");
     reqwest::Client::builder()
         .proxy(proxy)
         // Optionally configure the client
+        .build()
+        .expect("Failed to create Client")
+});
+
+#[cfg(not(feature = "testing"))]
+static CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
+    reqwest::Client::builder()
         .build()
         .expect("Failed to create Client")
 });
@@ -41,18 +53,21 @@ pub trait Fetch {
 }
 
 /// Exctract content from data source
-pub async fn fetch_content(source: impl AsRef<str>) -> Result<Payload> {
+pub async fn fetch_content(source: impl AsRef<str>, with_proxy: bool) -> Result<Payload> {
     let name = source.as_ref();
     match &name[..4] {
         // including http / https
-        "http" => UrlFetcher(name).fetch().await,
+        "http" => {
+            let client = if with_proxy { &PROXY_CLIENT } else { &CLIENT };
+            UrlFetcher(name, client).fetch().await
+        }
         // handle file://<filename>
         "file" => FileFetcher(name).fetch().await,
         _ => Err(anyhow!("Only support http/https/file at the moment")),
     }
 }
 
-struct UrlFetcher<'a>(pub(crate) &'a str);
+struct UrlFetcher<'a>(pub(crate) &'a str, &'a reqwest::Client);
 struct FileFetcher<'a>(pub(crate) &'a str);
 
 #[async_trait]
@@ -60,7 +75,7 @@ impl<'a> Fetch for UrlFetcher<'a> {
     type Error = anyhow::Error;
 
     async fn fetch(&self) -> Result<Payload, Self::Error> {
-        let resp = CLIENT.get(self.0).send().await?;
+        let resp = self.1.get(self.0).send().await?;
         match resp.status() {
             StatusCode::OK => {
                 let content_type = resp
@@ -149,7 +164,7 @@ mod tests {
             .create_async()
             .await;
 
-        let payload = fetch_content(url.as_str()).await.unwrap();
+        let payload = fetch_content(url.as_str(), false).await.unwrap();
         assert_eq!(payload.content, "Hello World");
         assert_eq!(payload.source, url);
         assert_eq!(payload.content_type, "text/html");
@@ -159,7 +174,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fetch_content_file() {
-        let payload = fetch_content("file://Cargo.toml").await.unwrap();
+        let payload = fetch_content("file://Cargo.toml", false).await.unwrap();
         assert!(payload.content.contains("version"));
         assert_eq!(payload.source, "file://Cargo.toml");
         assert_eq!(payload.content_type, "text/plain");

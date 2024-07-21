@@ -1,25 +1,26 @@
 use super::kafka::Producer;
+use crate::config::setting::SETTINGS;
 use crate::engine::fetcher::{fetch_content, Payload};
 use crate::engine::parser::{DailyCloseStrategy, Parser};
-use chrono::{Datelike, Local};
+
+use chrono::{DateTime, Datelike, Local};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Semaphore};
 
 static CAPACITY: usize = 2;
 
-pub async fn execute() {
+pub async fn execute(d: DateTime<Local>) {
     let (url_tx, url_rx) = mpsc::channel(CAPACITY);
 
     // retrieve all handles and ensure process not termiated before tasks completed
-    let url_gen_handle = tokio::spawn(generate_urls(url_tx));
-    let fetch_aggregate_handle = tokio::spawn(fetch_urls(url_rx, CAPACITY));
+    let url_gen_handle = tokio::spawn(generate_urls(d, url_tx));
+    let fetch_aggregate_handle = tokio::spawn(fetch_urls(d, url_rx, CAPACITY));
 
     // Await on both handles to ensure completion
     let _results = tokio::try_join!(url_gen_handle, fetch_aggregate_handle);
 }
 
-fn get_date(t: &str) -> String {
-    let day = Local::now();
+fn get_date(day: DateTime<Local>, t: &str) -> String {
     match t {
         "twse" => format!("{}{:02}{:02}", day.year(), day.month(), day.day()),
         "tpex" => format!("{}/{:02}/{:02}", day.year() - 1911, day.month(), day.day()),
@@ -27,15 +28,15 @@ fn get_date(t: &str) -> String {
     }
 }
 
-async fn generate_urls(url_tx: mpsc::Sender<String>) {
+async fn generate_urls(d: DateTime<Local>, url_tx: mpsc::Sender<String>) {
     let twse_url = format!(
         "https://www.twse.com.tw/exchangeReport/MI_INDEX?response=csv&date={}&type=ALLBUT0999",
-        get_date("twse")
+        get_date(d, "twse")
     );
 
     let tpex_url = format!(
         "https://www.tpex.org.tw/web/stock/aftertrading/daily_close_quotes/stk_quote_download.php?l=zh-tw&d={}&s=0,asc,0",
-        get_date("tpex")
+        get_date(d, "tpex")
     );
 
     let urls: [&str; 2] = [&twse_url, &tpex_url];
@@ -49,7 +50,7 @@ async fn generate_urls(url_tx: mpsc::Sender<String>) {
     drop(url_tx);
 }
 
-async fn fetch_urls(mut url_rx: mpsc::Receiver<String>, capacity: usize) {
+async fn fetch_urls(d: DateTime<Local>, mut url_rx: mpsc::Receiver<String>, capacity: usize) {
     let semaphore = Arc::new(Semaphore::new(2));
     let (content_tx, content_rx) = mpsc::channel(capacity);
 
@@ -64,7 +65,7 @@ async fn fetch_urls(mut url_rx: mpsc::Receiver<String>, capacity: usize) {
                     .expect("Failed to acquire semaphore permit");
 
                 println!("Fetching data from {}", url);
-                match fetch_content(url).await {
+                match fetch_content(url, false).await {
                     Ok(payload) => {
                         if let Err(e) = content_tx_clone.send(payload).await {
                             eprintln!("Failed to send content: {}", e);
@@ -78,25 +79,24 @@ async fn fetch_urls(mut url_rx: mpsc::Receiver<String>, capacity: usize) {
         }
     });
 
-    let aggregate_handle = tokio::spawn(aggregate(content_rx));
+    let aggregate_handle = tokio::spawn(aggregate(d, content_rx));
     // Await on both handles to ensure completion
     let _results = tokio::try_join!(fetch_handle, aggregate_handle);
 }
 
-async fn aggregate(mut content_rx: mpsc::Receiver<Payload>) {
-    let kafka_brokers = std::env::var("KAFKA_BROKERS").unwrap();
-    let kproducer = Producer::new(kafka_brokers.as_str());
+async fn aggregate(d: DateTime<Local>, mut content_rx: mpsc::Receiver<Payload>) {
+    let kproducer = Producer::new(&SETTINGS.kafka.brokers);
 
     while let Some(payload) = content_rx.recv().await {
         let mut cloned = payload.clone();
-        cloned.date = Some(get_date("twse"));
+        cloned.date = Some(get_date(d, "twse"));
         let parser = Parser::new(DailyCloseStrategy);
         match parser.parse(cloned).await {
             Ok(result) => {
                 for record in result {
                     let payload = record.to_json().unwrap();
                     match &kproducer
-                        .send("dailyclose-v1".to_string(), payload.clone())
+                        .send("dailycloses-v1".to_string(), payload.clone())
                         .await
                     {
                         Ok(_) => println!("{}", payload),

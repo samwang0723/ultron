@@ -1,4 +1,5 @@
 use super::kafka::Producer;
+use crate::config::setting::SETTINGS;
 use crate::engine::fetcher::{fetch_content, Payload};
 use crate::engine::models::concentration::Concentration;
 use crate::engine::parser::{ConcentrationStrategy, Parser};
@@ -72,7 +73,7 @@ async fn fetch_urls(mut url_rx: mpsc::Receiver<String>, capacity: usize) {
                     .await
                     .expect("Failed to acquire semaphore permit");
 
-                match fetch_content(url.clone()).await {
+                match fetch_content(url.clone(), true).await {
                     Ok(payload) => {
                         if let Err(e) = content_tx_clone.send(payload).await {
                             eprintln!("Failed to send content: {}", e);
@@ -98,8 +99,7 @@ async fn aggregate(mut content_rx: mpsc::Receiver<Payload>) {
     let today = Local::now();
     let formatted_date = format!("{}{:02}{:02}", today.year(), today.month(), today.day());
     let mut stock_map: HashMap<String, Concentration> = HashMap::new();
-    let kafka_brokers = std::env::var("KAFKA_BROKERS").unwrap();
-    let kproducer = Producer::new(kafka_brokers.as_str());
+    let kproducer = Producer::new(&SETTINGS.kafka.brokers);
 
     while let Some(payload) = content_rx.recv().await {
         let url = payload.source.clone();

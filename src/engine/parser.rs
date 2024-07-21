@@ -149,7 +149,10 @@ impl ParseStrategy for ConcentrationStrategy {
 
     async fn parse(&self, payload: Self::Input) -> Result<Self::Output, Self::Error> {
         let (stock_id, pos) = self.identifier(&payload.source)?;
-
+        println!(
+            "source: {}, content-type: {}",
+            payload.source, payload.content_type
+        );
         let document = Html::parse_document(&payload.content);
         let selector = Selector::parse("td.t3n1[colspan='4']")
             .map_err(|e| anyhow!("Failed to create selector: {}", e))?;

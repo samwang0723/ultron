@@ -30,12 +30,11 @@ WORKDIR /
 
 COPY --from=build_base /usr/share/zoneinfo /usr/share/zoneinfo
 COPY --from=build_base /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-# Copy the binary from the builder stage
-COPY --from=build_base /app/stocks.json /stocks.json
+COPY --from=build_base /app/config.prod.yaml /config.prod.yaml
 COPY --from=build_base /app/target/release/ultron /ultron
 
 # This container exposes ports to the outside world
-EXPOSE 80 443 9092 6379
+EXPOSE 80 443
 
 ENV TZ=Asia/Taipei
 

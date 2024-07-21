@@ -38,7 +38,7 @@ docker-m1:
 		-t samwang0723/$(APP_NAME):$(VERSION) \
 		--build-arg LAST_MAIN_COMMIT_HASH=$(LAST_MAIN_COMMIT_HASH) \
 		--build-arg LAST_MAIN_COMMIT_TIME=$(LAST_MAIN_COMMIT_TIME) \
-		-f build/Dockerfile .
+		-f Dockerfile .
 
 docker-amd64-deps:
 	@echo "[docker buildx] install buildx depedency"
@@ -54,7 +54,7 @@ docker-amd64:
 		-t samwang0723/$(APP_NAME):$(VERSION) \
 		--build-arg LAST_MAIN_COMMIT_HASH=$(LAST_MAIN_COMMIT_HASH) \
 		--build-arg LAST_MAIN_COMMIT_TIME=$(LAST_MAIN_COMMIT_TIME) \
-		-f build/Dockerfile .
+		-f Dockerfile .
 
 ###########
 # release #
