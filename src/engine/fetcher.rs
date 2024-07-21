@@ -3,6 +3,7 @@ use async_trait::async_trait;
 use encoding_rs::*;
 use once_cell::sync::Lazy;
 use reqwest::StatusCode;
+use std::time::Duration;
 use tokio::fs;
 
 use crate::config::setting::SETTINGS;
@@ -26,6 +27,7 @@ static PROXY_CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
     let proxy = reqwest::Proxy::https(proxy_url).expect("Failed to create proxy");
     reqwest::Client::builder()
         .proxy(proxy)
+        .timeout(Duration::from_secs(60))
         // Optionally configure the client
         .build()
         .expect("Failed to create Client")
@@ -34,6 +36,7 @@ static PROXY_CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
 #[cfg(not(feature = "testing"))]
 static CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
     reqwest::Client::builder()
+        .timeout(Duration::from_secs(60))
         .build()
         .expect("Failed to create Client")
 });

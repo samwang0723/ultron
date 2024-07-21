@@ -1,10 +1,10 @@
-use crate::engine::models::daily_close::*;
-
 use super::*;
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use csv::StringRecord;
 use models::concentration;
+use models::daily_close;
+use models::three_primary;
 use regex::Regex;
 use scraper::{Html, Selector};
 use std::fmt::Display;
@@ -37,7 +37,7 @@ pub struct DailyCloseStrategy;
 impl Conversion for DailyCloseStrategy {}
 
 impl DailyCloseStrategy {
-    fn is_valid_record(&self, record: &StringRecord, index_set: &IndexSet) -> bool {
+    fn is_valid_record(&self, record: &StringRecord, index_set: &daily_close::CsvIndexSet) -> bool {
         record.len() >= 17
             && self.is_integer(&record[index_set.stock_id])
             && [
@@ -54,16 +54,16 @@ impl DailyCloseStrategy {
     fn parse_record(
         &self,
         record: &StringRecord,
-        index_set: &IndexSet,
+        index_set: &daily_close::CsvIndexSet,
         date: &Option<String>,
-    ) -> Result<DailyClose> {
+    ) -> Result<daily_close::DailyClose> {
         let diff = self.parse_with_comma::<f32>(&record[index_set.diff])?;
         let diff = match index_set.diff_sign {
             Some(index) if record[index].contains('-') => -diff,
             _ => diff,
         };
 
-        Ok(DailyClose {
+        Ok(daily_close::DailyClose {
             stock_id: record[index_set.stock_id].to_string(),
             exchange_date: date.clone().unwrap_or_default(),
             trade_shares: self.parse_with_comma::<i64>(&record[index_set.trade_shares])?,
@@ -90,13 +90,97 @@ impl DailyCloseStrategy {
 impl ParseStrategy for DailyCloseStrategy {
     type Error = anyhow::Error;
     type Input = fetcher::Payload;
-    type Output = Vec<DailyClose>;
+    type Output = Vec<daily_close::DailyClose>;
 
     async fn parse(&self, payload: Self::Input) -> Result<Self::Output, Self::Error> {
         let index_set = if payload.source.contains("twse") {
-            IndexSet::new_twse()
+            daily_close::CsvIndexSet::new_twse()
         } else if payload.source.contains("tpex") {
-            IndexSet::new_tpex()
+            daily_close::CsvIndexSet::new_tpex()
+        } else {
+            return Err(anyhow!("Cannot identify parse index"));
+        };
+
+        let mut rdr = csv::ReaderBuilder::new()
+            .has_headers(false)
+            .delimiter(b',')
+            .flexible(true)
+            .from_reader(payload.content.as_bytes());
+
+        let records = rdr
+            .records()
+            .filter_map(|result| result.ok())
+            .filter(|record| self.is_valid_record(record, &index_set))
+            .filter_map(|record| self.parse_record(&record, &index_set, &payload.date).ok())
+            .collect();
+
+        Ok(records)
+    }
+}
+
+#[derive(Debug)]
+pub struct ThreePrimaryStrategy;
+
+impl Conversion for ThreePrimaryStrategy {}
+
+impl ThreePrimaryStrategy {
+    fn is_valid_record(
+        &self,
+        record: &StringRecord,
+        index_set: &three_primary::CsvIndexSet,
+    ) -> bool {
+        record.len() >= 19
+            && self.is_integer(&record[index_set.stock_id])
+            && [
+                index_set.foreign_trade_shares,
+                index_set.trust_trade_shares,
+                index_set.dealer_trade_shares,
+                index_set.hedging_trade_shares,
+            ]
+            .iter()
+            .all(|&index| self.valid(&record[index]))
+    }
+
+    fn parse_record(
+        &self,
+        record: &StringRecord,
+        index_set: &three_primary::CsvIndexSet,
+        date: &Option<String>,
+    ) -> Result<three_primary::ThreePrimary> {
+        Ok(three_primary::ThreePrimary {
+            stock_id: record[index_set.stock_id].to_string(),
+            exchange_date: date.clone().unwrap_or_default(),
+            foreign_trade_shares: self
+                .parse_with_comma::<i64>(&record[index_set.foreign_trade_shares])?,
+            trust_trade_shares: self
+                .parse_with_comma::<i64>(&record[index_set.trust_trade_shares])?,
+            dealer_trade_shares: self
+                .parse_with_comma::<i64>(&record[index_set.dealer_trade_shares])?,
+            hedging_trade_shares: self
+                .parse_with_comma::<i64>(&record[index_set.hedging_trade_shares])?,
+        })
+    }
+
+    fn is_integer(&self, s: &str) -> bool {
+        s.parse::<i32>().is_ok() && s.len() == 4
+    }
+
+    fn valid(&self, s: &str) -> bool {
+        !s.is_empty() && s != "---"
+    }
+}
+
+#[async_trait]
+impl ParseStrategy for ThreePrimaryStrategy {
+    type Error = anyhow::Error;
+    type Input = fetcher::Payload;
+    type Output = Vec<three_primary::ThreePrimary>;
+
+    async fn parse(&self, payload: Self::Input) -> Result<Self::Output, Self::Error> {
+        let index_set = if payload.source.contains("twse") {
+            three_primary::CsvIndexSet::new_twse()
+        } else if payload.source.contains("tpex") {
+            three_primary::CsvIndexSet::new_tpex()
         } else {
             return Err(anyhow!("Cannot identify parse index"));
         };

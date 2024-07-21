@@ -1,7 +1,7 @@
 use serde::Serialize;
 use serde_json;
 
-pub struct IndexSet {
+pub struct CsvIndexSet {
     pub stock_id: usize,
     pub trade_shares: usize,
     pub transactions: usize,
@@ -14,7 +14,7 @@ pub struct IndexSet {
     pub diff_sign: Option<usize>,
 }
 
-impl IndexSet {
+impl CsvIndexSet {
     pub fn new_twse() -> Self {
         Self {
             stock_id: 0,

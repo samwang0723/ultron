@@ -38,9 +38,8 @@ async fn main() {
     };
 
     match args.target.as_str() {
-        "daily_close" => {
-            process::daily_close::execute(date).await;
-        }
+        "daily_close" => process::daily_close::execute(date).await,
+        "three_primary" => process::three_primary::execute(date).await,
         "concentration" => {
             // Create a connection pool
             let pool = PgPoolOptions::new()
