@@ -1,9 +1,13 @@
 # syntax=docker/dockerfile:1
 # Stage 1: Build the Rust application
-FROM rust:1.73-alpine as build_base
+FROM rust:1.78-alpine as build_base
 
 # Add Maintainer Info
 LABEL maintainer="Sam Wang <sam.wang.0723@gmail.com>"
+
+
+RUN apk add --no-cache git
+RUN apk update && apk add ca-certificates && apk add tzdata
 
 # Install required packages
 RUN apk add --no-cache \
@@ -13,8 +17,9 @@ RUN apk add --no-cache \
     pkgconfig \
     cmake
 
-RUN apk add --no-cache git
-RUN apk update && apk add ca-certificates && apk add tzdata
+RUN cargo install wasm-bindgen-cli
+
+ENV OPENSSL_DIR=/usr
 
 WORKDIR /app
 

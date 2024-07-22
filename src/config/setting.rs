@@ -47,6 +47,7 @@ impl Settings {
 
     fn load_from_file(env: &str) -> Self {
         let file = format!("config.{}.yaml", env);
+        println!("Loading configuration from: {}", file);
         let settings = Config::builder()
             .add_source(config::File::with_name(&file))
             .build()

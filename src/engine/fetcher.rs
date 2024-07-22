@@ -8,15 +8,7 @@ use tokio::fs;
 
 use crate::config::setting::SETTINGS;
 
-#[cfg(feature = "testing")]
-static CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
-    reqwest::Client::builder()
-        .build()
-        .expect("Failed to create Client")
-});
-
 // Define a static instance of `Client` which will be initialized on the first use
-#[cfg(not(feature = "testing"))]
 static PROXY_CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
     let proxy_settings = &SETTINGS.proxy;
     let proxy_url = format!(
@@ -33,7 +25,6 @@ static PROXY_CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
         .expect("Failed to create Client")
 });
 
-#[cfg(not(feature = "testing"))]
 static CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
     reqwest::Client::builder()
         .timeout(Duration::from_secs(60))
