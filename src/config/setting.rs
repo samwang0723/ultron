@@ -42,6 +42,8 @@ impl Settings {
         let env = std::env::var("ENV").unwrap();
         let mut cfg = Self::load_from_file(&env);
         Self::customize_from_env(&mut cfg);
+
+        println!("{:?}", cfg);
         cfg
     }
 
@@ -75,5 +77,20 @@ impl DatabaseSettings {
             "postgres://{}:{}@{}:{}/{}",
             self.user, self.dbpasswd, self.host, self.port, self.dbname
         )
+    }
+}
+
+impl ProxySettings {
+    pub fn connection_string(&self) -> String {
+        format!(
+            "http://{}:{}@{}:{}",
+            self.username, self.passwd, self.host, self.port
+        )
+    }
+}
+
+impl KafkaSettings {
+    pub fn connection_string(&self) -> String {
+        self.brokers.clone()
     }
 }

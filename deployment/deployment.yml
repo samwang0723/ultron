@@ -1,4 +1,3 @@
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -13,72 +12,7 @@ spec:
       labels:
         app: ultron
     spec:
-     volumes:
-     - name: share
-       emptyDir: {}
-     - name: flags
-       emptyDir: {}
-     initContainers:
-     - name: init
-       image: busybox:musl
-       command: ["cp", "/bin/sh", "/bin/busybox", "/share/"]
-       volumeMounts:
-       - name: share
-         mountPath: /share
-     containers:
-     - name: curl
-       image: curlimages/curl:7.78.0
-       command:
-         - /bin/sh
-         - -c
-         - |
-           # test istio-proxy
-           until curl -fsI http://localhost:15021/healthz/ready; do
-             echo 'Waiting for Sidecar...'
-             sleep 1
-           done
-           # touch the flag in tmp dir
-           touch /tmp/flags/istio-proxy-ready
-           # then wait for the job to finish
-           until [ -f /tmp/flags/done ]; do
-             echo 'Waiting for the job to finish...'
-             sleep 1
-           done
-           # ask istio-proxy to exit
-           curl -fsI -X POST http://localhost:15020/quitquitquit
-       volumeMounts:
-         - name: flags
-           mountPath: /tmp/flags
-     - name: ultron
-       image: samwang0723/ultron:v0.2.0
-       command:
-         - /share/sh
-         - -c
-         - |
-           # wait for the flag of istio-proxy
-           until [[ -f /tmp/flags/istio-proxy-ready ]]; do
-             echo 'Waiting for Sidecar...'
-             sleep 1
-           done
-           # do the job
-           /ultron --target=daily_close
-           # set the flag so curl can shut down istio-proxy
-           /share/busybox touch /tmp/flags/done
-       volumeMounts:
-       - name: share
-         mountPath: /share
-       - name: flags
-         mountPath: /tmp/flags
-       env:
-       - name: ENV
-         value: prod
-       - name: PROXY_PASSWD
-         valueFrom:
-           secretKeyRef:
-             name: proxy-secret
-             key: passwd
-       - name: DB_PASSWD
-         valueFrom:
-           secretKeyRef:
-             name: database-secret
-             key: password
+      containers:
+      - name: ultron
+        image: samwang0723/ultron:v1.0.0
+        args: ["--target=daily_close --date=20240722"]  # This will override the CMD in the Dockerfile

@@ -65,7 +65,7 @@ async fn fetch_urls(d: DateTime<Local>, mut url_rx: mpsc::Receiver<String>, capa
                     .expect("Failed to acquire semaphore permit");
 
                 println!("Fetching data from {}", url);
-                match fetch_content(url, false).await {
+                match fetch_content(url).await {
                     Ok(payload) => {
                         if let Err(e) = content_tx_clone.send(payload).await {
                             eprintln!("Failed to send content: {}", e);

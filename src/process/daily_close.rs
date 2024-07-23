@@ -65,7 +65,7 @@ async fn fetch_urls(d: DateTime<Local>, mut url_rx: mpsc::Receiver<String>, capa
                     .expect("Failed to acquire semaphore permit");
 
                 println!("Fetching data from {}", url);
-                match fetch_content(url, false).await {
+                match fetch_content(url).await {
                     Ok(payload) => {
                         if let Err(e) = content_tx_clone.send(payload).await {
                             eprintln!("Failed to send content: {}", e);
@@ -85,22 +85,29 @@ async fn fetch_urls(d: DateTime<Local>, mut url_rx: mpsc::Receiver<String>, capa
 }
 
 async fn aggregate(d: DateTime<Local>, mut content_rx: mpsc::Receiver<Payload>) {
-    let kproducer = Producer::new(&SETTINGS.kafka.brokers);
+    let kproducer = Producer::new(&SETTINGS.kafka.connection_string());
 
-    while let Some(payload) = content_rx.recv().await {
-        let mut cloned = payload.clone();
-        cloned.date = Some(get_date(d, "twse"));
+    while let Some(raw) = content_rx.recv().await {
+        let mut raw_payload = raw.clone();
+        raw_payload.date = Some(get_date(d, "twse"));
         let parser = Parser::new(DailyCloseStrategy);
-        match parser.parse(cloned).await {
+        match parser.parse(raw_payload).await {
             Ok(result) => {
+                // print result
+                println!("Parsed result: {:?}", result);
+
                 for record in result {
-                    let payload = record.to_json().unwrap();
-                    match &kproducer
-                        .send("dailycloses-v1".to_string(), payload.clone())
-                        .await
-                    {
-                        Ok(_) => println!("{}", payload),
-                        Err(e) => eprintln!("Failed to send message: {}", e),
+                    match record.to_json() {
+                        Ok(payload) => {
+                            match &kproducer
+                                .send("dailycloses-v1".to_string(), payload.clone())
+                                .await
+                            {
+                                Ok(_) => println!("{}", payload),
+                                Err(e) => eprintln!("Failed to send message: {}", e),
+                            }
+                        }
+                        Err(e) => eprintln!("Failed to convert record to JSON: {}", e),
                     }
                 }
             }

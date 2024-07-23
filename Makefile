@@ -5,7 +5,7 @@ help: ## show this help
 
 PROJECT_NAME?=core
 APP_NAME?=ultron
-VERSION?=v0.2.0
+VERSION?=v1.0.0
 
 SHELL = /bin/bash
 
@@ -34,7 +34,7 @@ docker-build: lint test docker-m1 ## build docker image in M1 device
 
 docker-m1:
 	@echo "[docker build] build local docker image on Mac M1"
-	@docker build \
+	@docker build --progress=plain \
 		-t samwang0723/$(APP_NAME):$(VERSION) \
 		--build-arg LAST_MAIN_COMMIT_HASH=$(LAST_MAIN_COMMIT_HASH) \
 		--build-arg LAST_MAIN_COMMIT_TIME=$(LAST_MAIN_COMMIT_TIME) \

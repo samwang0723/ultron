@@ -1,36 +1,37 @@
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use encoding_rs::*;
-use once_cell::sync::Lazy;
+use lazy_static::lazy_static;
+use reqwest::header::HeaderMap;
 use reqwest::StatusCode;
 use std::time::Duration;
 use tokio::fs;
 
 use crate::config::setting::SETTINGS;
 
+#[cfg(feature = "testing")]
+lazy_static! {
+    pub static ref CLIENT: reqwest::Client = {
+        reqwest::Client::builder()
+            .build()
+            .expect("Failed to create Client")
+    };
+}
+
 // Define a static instance of `Client` which will be initialized on the first use
-static PROXY_CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
-    let proxy_settings = &SETTINGS.proxy;
-    let proxy_url = format!(
-        "http://{}:{}@{}:{}",
-        proxy_settings.username, proxy_settings.passwd, proxy_settings.host, proxy_settings.port
-    );
-
-    let proxy = reqwest::Proxy::https(proxy_url).expect("Failed to create proxy");
-    reqwest::Client::builder()
-        .proxy(proxy)
-        .timeout(Duration::from_secs(60))
-        // Optionally configure the client
-        .build()
-        .expect("Failed to create Client")
-});
-
-static CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
-    reqwest::Client::builder()
-        .timeout(Duration::from_secs(60))
-        .build()
-        .expect("Failed to create Client")
-});
+#[cfg(not(feature = "testing"))]
+lazy_static! {
+    pub static ref CLIENT: reqwest::Client =  {
+        let proxy =
+            reqwest::Proxy::https(SETTINGS.proxy.connection_string()).expect("Failed to create proxy");
+        reqwest::Client::builder()
+            .proxy(proxy)
+            .timeout(Duration::from_secs(60))
+            // Optionally configure the client
+            .build()
+            .expect("Failed to create Client")
+    };
+}
 
 #[derive(Debug, Clone)]
 pub struct Payload {
@@ -47,21 +48,18 @@ pub trait Fetch {
 }
 
 /// Exctract content from data source
-pub async fn fetch_content(source: impl AsRef<str>, with_proxy: bool) -> Result<Payload> {
+pub async fn fetch_content(source: impl AsRef<str>) -> Result<Payload> {
     let name = source.as_ref();
     match &name[..4] {
         // including http / https
-        "http" => {
-            let client = if with_proxy { &PROXY_CLIENT } else { &CLIENT };
-            UrlFetcher(name, client).fetch().await
-        }
+        "http" => UrlFetcher(name).fetch().await,
         // handle file://<filename>
         "file" => FileFetcher(name).fetch().await,
         _ => Err(anyhow!("Only support http/https/file at the moment")),
     }
 }
 
-struct UrlFetcher<'a>(pub(crate) &'a str, &'a reqwest::Client);
+struct UrlFetcher<'a>(pub(crate) &'a str);
 struct FileFetcher<'a>(pub(crate) &'a str);
 
 #[async_trait]
@@ -69,14 +67,10 @@ impl<'a> Fetch for UrlFetcher<'a> {
     type Error = anyhow::Error;
 
     async fn fetch(&self) -> Result<Payload, Self::Error> {
-        let resp = self.1.get(self.0).send().await?;
+        let resp = CLIENT.get(self.0).send().await?;
         match resp.status() {
             StatusCode::OK => {
-                let content_type = resp
-                    .headers()
-                    .get("content-type")
-                    .map(|v| v.to_str().unwrap_or_default().to_owned())
-                    .unwrap_or_default();
+                let content_type = self.get_content_type(resp.headers());
 
                 // Charset checking
                 let charset = if ["ms950", "big5", "csv"]
@@ -111,6 +105,16 @@ impl<'a> Fetch for UrlFetcher<'a> {
 }
 
 impl UrlFetcher<'_> {
+    fn get_content_type(&self, headers: &HeaderMap) -> String {
+        match headers.get("content-type") {
+            Some(header_value) => match header_value.to_str() {
+                Ok(value) => value.to_owned(),
+                Err(_) => String::new(), // Handle the error case, e.g., log the error
+            },
+            None => String::new(), // Handle the case where the header is not present
+        }
+    }
+
     fn decode_big5(&self, input: &[u8]) -> Result<String, anyhow::Error> {
         let (decoded_content, _, had_errors) = BIG5.decode(input);
         if had_errors {
@@ -158,7 +162,7 @@ mod tests {
             .create_async()
             .await;
 
-        let payload = fetch_content(url.as_str(), false).await.unwrap();
+        let payload = fetch_content(url.as_str()).await.unwrap();
         assert_eq!(payload.content, "Hello World");
         assert_eq!(payload.source, url);
         assert_eq!(payload.content_type, "text/html");
@@ -168,7 +172,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fetch_content_file() {
-        let payload = fetch_content("file://Cargo.toml", false).await.unwrap();
+        let payload = fetch_content("file://Cargo.toml").await.unwrap();
         assert!(payload.content.contains("version"));
         assert_eq!(payload.source, "file://Cargo.toml");
         assert_eq!(payload.content_type, "text/plain");

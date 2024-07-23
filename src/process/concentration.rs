@@ -73,7 +73,7 @@ async fn fetch_urls(mut url_rx: mpsc::Receiver<String>, capacity: usize) {
                     .await
                     .expect("Failed to acquire semaphore permit");
 
-                match fetch_content(url.clone(), true).await {
+                match fetch_content(url.clone()).await {
                     Ok(payload) => {
                         if let Err(e) = content_tx_clone.send(payload).await {
                             eprintln!("Failed to send content: {}", e);

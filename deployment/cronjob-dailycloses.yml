@@ -47,7 +47,7 @@ spec:
               - name: flags
                 mountPath: /tmp/flags
           - name: ultron
-            image: samwang0723/ultron:v0.2.0
+            image: samwang0723/ultron:v1.0.0
             command:
               - /share/sh
               - -c
