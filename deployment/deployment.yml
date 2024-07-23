@@ -15,4 +15,18 @@ spec:
       containers:
       - name: ultron
         image: samwang0723/ultron:v1.0.0
-        args: ["--target=daily_close --date=20240722"]  # This will override the CMD in the Dockerfile
+        imagePullPolicy: Always
+        args: ["--target=concentration"]  # This will override the CMD in the Dockerfile
+        env:
+        - name: ENV
+          value: prod
+        - name: PROXY_PASSWD
+          valueFrom:
+            secretKeyRef:
+              name: proxy-secret
+              key: passwd
+        - name: DB_PASSWD
+          valueFrom:
+            secretKeyRef:
+              name: database-secret
+              key: password

@@ -3,7 +3,7 @@ kind: CronJob
 metadata:
   name: ultron-cronjob-threeprimary
 spec:
-  schedule: "55 10 * * 1-5"  # At 6 PM on every day-of-week from Monday through Friday UTC
+  schedule: "30 09 * * 1-5"  # At 5:30 PM on every day-of-week from Monday through Friday UTC
   jobTemplate:
     spec:
       ttlSecondsAfterFinished: 600
@@ -48,6 +48,7 @@ spec:
                 mountPath: /tmp/flags
           - name: ultron
             image: samwang0723/ultron:v1.0.0
+            imagePullPolicy: Always
             command:
               - /share/sh
               - -c
@@ -58,7 +59,7 @@ spec:
                   sleep 1
                 done
                 # do the job
-                /ultron --target=three_primary
+                /app/ultron --target=three_primary
                 # set the flag so curl can shut down istio-proxy
                 /share/busybox touch /tmp/flags/done
             volumeMounts:
