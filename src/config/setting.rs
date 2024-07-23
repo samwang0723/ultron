@@ -39,7 +39,7 @@ lazy_static! {
 
 impl Settings {
     pub fn new() -> Self {
-        let env = std::env::var("ENV").unwrap();
+        let env = std::env::var("ENV").unwrap_or_else(|_| "local".to_string());
         let mut cfg = Self::load_from_file(&env);
         Self::customize_from_env(&mut cfg);
 

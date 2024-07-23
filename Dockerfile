@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # Stage 1: Build the Rust application
-FROM rust:1.78-slim AS build_base
+FROM rust:bookworm AS build_base
 
 WORKDIR /usr/src
 
@@ -30,9 +30,6 @@ COPY config.*.yaml /usr/src/ultron/
 # Set the working directory
 WORKDIR /usr/src/ultron
 
-## Install target platform (Cross-Compilation) --> Needed for Alpine
-#RUN rustup target add x86_64-unknown-linux-musl
-
 # This is a dummy build to get the dependencies cached.
 RUN cargo build --release
 
@@ -44,16 +41,23 @@ RUN touch /usr/src/ultron/src/main.rs
 
 RUN cargo build --release
 
-# Stage 2: Start fresh from a smaller image
-#FROM alpine:latest
 
-# Copy the binary from the builder stage
-#COPY --from=build_base /usr/src/config.local.yaml /config.local.yaml
-#COPY --from=build_base /usr/src/config.prod.yaml /config.prod.yaml
-#COPY --from=build_base /usr/src/ultron/target/x86_64-unknown-linux-musl/release/ultron /usr/local/bin
+# Stage 2: Create a smaller image with the built binary
+FROM debian:bookworm-slim
+
+WORKDIR /app
+
+# Install necessary runtime dependencies
+RUN apt-get update && apt-get install -y ca-certificates && apt clean && rm -rf /var/lib/apt/lists/*
+
+# Copy the binary from the build stage
+COPY --from=build_base /usr/src/ultron/target/release/ultron /app/ultron
+
+# Copy any other necessary files (e.g., config files)
+COPY --from=build_base /usr/src/ultron/config.*.yaml /app/
 
 # This container exposes ports to the outside world
 EXPOSE 80 443
 
 # Set the CMD to your binary
-ENTRYPOINT ["/usr/src/ultron/target/release/ultron"]
+ENTRYPOINT ["/app/ultron"]
