@@ -1,7 +1,8 @@
-use super::kafka::Producer;
 use crate::config::setting::SETTINGS;
 use crate::engine::fetcher::{fetch_content, Payload};
-use crate::engine::parser::{DailyCloseStrategy, Parser};
+use crate::engine::parser::Parser;
+use crate::engine::strategies::daily_close::DailyCloseStrategy;
+use crate::process::kafka::Producer;
 
 use chrono::{DateTime, Datelike, Local};
 use std::sync::Arc;
@@ -9,34 +10,34 @@ use tokio::sync::{mpsc, Semaphore};
 
 static CAPACITY: usize = 2;
 
-pub async fn execute(d: DateTime<Local>) {
+pub async fn execute(date: DateTime<Local>) {
     let (url_tx, url_rx) = mpsc::channel(CAPACITY);
 
     // retrieve all handles and ensure process not termiated before tasks completed
-    let url_gen_handle = tokio::spawn(generate_urls(d, url_tx));
-    let fetch_aggregate_handle = tokio::spawn(fetch_urls(d, url_rx, CAPACITY));
+    let url_gen_handle = tokio::spawn(generate_urls(date, url_tx));
+    let fetch_aggregate_handle = tokio::spawn(fetch_urls(date, url_rx, CAPACITY));
 
     // Await on both handles to ensure completion
     let _results = tokio::try_join!(url_gen_handle, fetch_aggregate_handle);
 }
 
-fn get_date(day: DateTime<Local>, t: &str) -> String {
-    match t {
+fn get_date(day: DateTime<Local>, exchange_type: &str) -> String {
+    match exchange_type {
         "twse" => format!("{}{:02}{:02}", day.year(), day.month(), day.day()),
         "tpex" => format!("{}/{:02}/{:02}", day.year() - 1911, day.month(), day.day()),
         _ => "".to_string(),
     }
 }
 
-async fn generate_urls(d: DateTime<Local>, url_tx: mpsc::Sender<String>) {
+async fn generate_urls(date: DateTime<Local>, url_tx: mpsc::Sender<String>) {
     let twse_url = format!(
         "https://www.twse.com.tw/exchangeReport/MI_INDEX?response=csv&date={}&type=ALLBUT0999",
-        get_date(d, "twse")
+        get_date(date, "twse")
     );
 
     let tpex_url = format!(
         "https://www.tpex.org.tw/web/stock/aftertrading/daily_close_quotes/stk_quote_download.php?l=zh-tw&d={}&s=0,asc,0",
-        get_date(d, "tpex")
+        get_date(date, "tpex")
     );
 
     let urls: [&str; 2] = [&twse_url, &tpex_url];
@@ -50,7 +51,7 @@ async fn generate_urls(d: DateTime<Local>, url_tx: mpsc::Sender<String>) {
     drop(url_tx);
 }
 
-async fn fetch_urls(d: DateTime<Local>, mut url_rx: mpsc::Receiver<String>, capacity: usize) {
+async fn fetch_urls(date: DateTime<Local>, mut url_rx: mpsc::Receiver<String>, capacity: usize) {
     let semaphore = Arc::new(Semaphore::new(2));
     let (content_tx, content_rx) = mpsc::channel(capacity);
 
@@ -79,17 +80,17 @@ async fn fetch_urls(d: DateTime<Local>, mut url_rx: mpsc::Receiver<String>, capa
         }
     });
 
-    let aggregate_handle = tokio::spawn(aggregate(d, content_rx));
+    let aggregate_handle = tokio::spawn(aggregate(date, content_rx));
     // Await on both handles to ensure completion
     let _results = tokio::try_join!(fetch_handle, aggregate_handle);
 }
 
-async fn aggregate(d: DateTime<Local>, mut content_rx: mpsc::Receiver<Payload>) {
+async fn aggregate(date: DateTime<Local>, mut content_rx: mpsc::Receiver<Payload>) {
     let kproducer = Producer::new(&SETTINGS.kafka.connection_string());
 
     while let Some(raw) = content_rx.recv().await {
         let mut raw_payload = raw.clone();
-        raw_payload.date = Some(get_date(d, "twse"));
+        raw_payload.date = Some(get_date(date, "twse"));
         let parser = Parser::new(DailyCloseStrategy);
         match parser.parse(raw_payload).await {
             Ok(result) => {

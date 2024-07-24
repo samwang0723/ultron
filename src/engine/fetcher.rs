@@ -11,7 +11,7 @@ use crate::config::setting::SETTINGS;
 
 #[cfg(feature = "testing")]
 lazy_static! {
-    pub static ref CLIENT: reqwest::Client = {
+    static ref CLIENT: reqwest::Client = {
         reqwest::Client::builder()
             .build()
             .expect("Failed to create Client")
@@ -21,7 +21,7 @@ lazy_static! {
 // Define a static instance of `Client` which will be initialized on the first use
 #[cfg(not(feature = "testing"))]
 lazy_static! {
-    pub static ref CLIENT: reqwest::Client =  {
+    static ref CLIENT: reqwest::Client =  {
         let proxy =
             reqwest::Proxy::https(SETTINGS.proxy.connection_string()).expect("Failed to create proxy");
         reqwest::Client::builder()
@@ -30,6 +30,13 @@ lazy_static! {
             // Optionally configure the client
             .build()
             .expect("Failed to create Client")
+    };
+
+    static ref NO_PROXY_CLIENT: reqwest::Client = {
+        reqwest::Client::builder()
+            .timeout(Duration::from_secs(60))
+            .build()
+            .expect("Failed to create No Proxy Client")
     };
 }
 
@@ -59,6 +66,14 @@ pub async fn fetch_content(source: impl AsRef<str>) -> Result<Payload> {
     }
 }
 
+fn crawling_client(url: &str) -> &'static reqwest::Client {
+    if url.contains("www.twse.com.tw") || url.contains("www.tpex.org.tw") {
+        &NO_PROXY_CLIENT
+    } else {
+        &CLIENT
+    }
+}
+
 struct UrlFetcher<'a>(pub(crate) &'a str);
 struct FileFetcher<'a>(pub(crate) &'a str);
 
@@ -67,7 +82,8 @@ impl<'a> Fetch for UrlFetcher<'a> {
     type Error = anyhow::Error;
 
     async fn fetch(&self) -> Result<Payload, Self::Error> {
-        let resp = CLIENT.get(self.0).send().await?;
+        let target = self.0;
+        let resp = crawling_client(target).get(target).send().await?;
         match resp.status() {
             StatusCode::OK => {
                 let content_type = self.get_content_type(resp.headers());
