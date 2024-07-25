@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.0] - 2024-07-25
+
+### Bug Fixes
+
+- Support skip_dates
+- Solve skip dates problem
+- One available docker build option
+- One available docker build option
+- Update cronjob
+
+### Features
+
+- Support postgresql stock query to correct the pulling targets
+- Support three primary data parsing / sending
+- Support new dockerfile build
+
+### Miscellaneous Tasks
+
+- Update CHANGELOG.md for v0.2.0
+
+### Refactor
+
+- Update the strategies
+
 ## [0.2.0] - 2023-11-23
 
 ### Bug Fixes
