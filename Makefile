@@ -34,7 +34,7 @@ docker-build: lint test docker-m1 ## build docker image in M1 device
 
 docker-m1:
 	@echo "[docker build] build local docker image on Mac M1"
-	@docker build --progress=plain \
+	@docker build \
 		-t samwang0723/$(APP_NAME):$(VERSION) \
 		--build-arg LAST_MAIN_COMMIT_HASH=$(LAST_MAIN_COMMIT_HASH) \
 		--build-arg LAST_MAIN_COMMIT_TIME=$(LAST_MAIN_COMMIT_TIME) \
@@ -60,47 +60,19 @@ docker-amd64:
 # release #
 ###########
 
-release: changelog-gen changelog-commit deploy-dev gh-release ## create a new tag to release this module
+release: changelog-gen changelog-commit deploy ## create a new tag to release this module
 
-CAL_VER := v$(shell date "+%Y.%m.%d.%H%M")
-PRODUCTION_YAML = deploy/production/kustomization.yaml
-STAGING_YAML = deploy/staging/kustomization.yaml
-DEV_YAML = deploy/develop/kustomization.yaml
-
-deploy-dev:
-	sed -i '' "s/newTag:.*/newTag: $(CAL_VER)/" $(DEV_YAML)
-	git commit -S -m "ci: deploy tag $(CAL_VER) to adev" $(DEV_YAML)
-	git tag $(CAL_VER)
-	git push --atomic origin $(CAL_VER)
-
-deploy-staging: ## deploy to staging env with a release tag
-	@( \
-	printf "Select a tag to deploy to staging:\n"; \
-	select tag in `git tag --sort=-committerdate | head -n 10` ; do	\
-		sed -i '' "s/newTag:.*/newTag: $$tag/" $(STAGING_YAML); \
-		git commit -S -m "ci: deploy tag $$tag to staging" $(STAGING_YAML); \
-		git push origin main; \
-		break; \
-	done )
-
-deploy-production: confirm_deployment ## deploy to production env with a release tag
-	@( \
-	printf "Select a tag to deploy to production:\n"; \
-	select tag in `git tag --sort=-committerdate | head -n 10` ; do	\
-		sed -i '' "s/newTag:.*/newTag: $$tag/" $(PRODUCTION_YAML); \
-		git commit -S -m "ci: deploy tag $$tag to production" $(PRODUCTION_YAML); \
-		git push origin main; \
-		break; \
-	done )
-
+##################
+# k8s Deployment #
+##################
 confirm_deployment:
-	@echo -n "Are you sure to deploy in production env? [y/N] " && read ans && [ $${ans:-N} = y ]
+	@echo -n "Are you sure to deploy in k8s? [y/N] " && read ans && [ $${ans:-N} = y ]
 
-gh-release:
-	@( \
-	TAG=`git tag --sort=-committerdate | head -1` && \
-	git cliff --latest --date-order | gh release create $$TAG -F - \
-	)
+deploy: confirm_deployment
+	@kubectl apply -f deployments/secret.yml
+	@kubectl apply -f deployments/cronjob-concentration.yml
+	@kubectl apply -f deployments/cronjob-dailycloses.yml
+	@kubectl apply -f deployments/cronjob-threeprimary.yml
 
 #############
 # changelog #
