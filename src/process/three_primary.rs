@@ -86,7 +86,14 @@ async fn fetch_urls(date: DateTime<Local>, mut url_rx: mpsc::Receiver<String>, c
 }
 
 async fn aggregate(date: DateTime<Local>, mut content_rx: mpsc::Receiver<Payload>) {
-    let kproducer = Producer::new(&SETTINGS.kafka.brokers);
+    // Create a new producer using match to handle the Result
+    let kproducer = match Producer::new(&SETTINGS.kafka.connection_string()) {
+        Ok(kproducer) => kproducer,
+        Err(e) => {
+            eprintln!("Failed to create producer: {}", e);
+            return;
+        }
+    };
 
     while let Some(raw) = content_rx.recv().await {
         let mut raw_payload = raw.clone();

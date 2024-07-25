@@ -100,7 +100,14 @@ async fn aggregate(mut content_rx: mpsc::Receiver<Payload>) {
     let today = Local::now();
     let formatted_date = format!("{}{:02}{:02}", today.year(), today.month(), today.day());
     let mut stock_map: HashMap<String, Concentration> = HashMap::new();
-    let kproducer = Producer::new(&SETTINGS.kafka.brokers);
+    // Create a new producer using match to handle the Result
+    let kproducer = match Producer::new(&SETTINGS.kafka.connection_string()) {
+        Ok(kproducer) => kproducer,
+        Err(e) => {
+            eprintln!("Failed to create producer: {}", e);
+            return;
+        }
+    };
 
     while let Some(payload) = content_rx.recv().await {
         let url = payload.source.clone();

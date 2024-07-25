@@ -4,6 +4,8 @@ use encoding_rs::*;
 use lazy_static::lazy_static;
 use reqwest::header::HeaderMap;
 use reqwest::StatusCode;
+use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
+use reqwest_retry::{policies::ExponentialBackoff, RetryTransientMiddleware};
 use std::time::Duration;
 use tokio::fs;
 
@@ -11,32 +13,47 @@ use crate::config::setting::SETTINGS;
 
 #[cfg(feature = "testing")]
 lazy_static! {
-    static ref CLIENT: reqwest::Client = {
-        reqwest::Client::builder()
+    static ref CLIENT: ClientWithMiddleware = {
+        let client = reqwest::Client::builder()
             .build()
-            .expect("Failed to create Client")
+            .expect("Failed to create Client");
+        // Retry up to 3 times with increasing intervals between attempts.
+        let retry_policy = ExponentialBackoff::builder().build_with_max_retries(3);
+        ClientBuilder::new(client)
+            .with(RetryTransientMiddleware::new_with_policy(retry_policy))
+            .build()
     };
 }
 
 // Define a static instance of `Client` which will be initialized on the first use
 #[cfg(not(feature = "testing"))]
 lazy_static! {
-    static ref CLIENT: reqwest::Client =  {
+    static ref CLIENT: ClientWithMiddleware =  {
         let proxy =
             reqwest::Proxy::https(SETTINGS.proxy.connection_string()).expect("Failed to create proxy");
-        reqwest::Client::builder()
+        let client = reqwest::Client::builder()
             .proxy(proxy)
             .timeout(Duration::from_secs(60))
             // Optionally configure the client
             .build()
-            .expect("Failed to create Client")
+            .expect("Failed to create Client");
+        // Retry up to 3 times with increasing intervals between attempts.
+        let retry_policy = ExponentialBackoff::builder().build_with_max_retries(3);
+        ClientBuilder::new(client)
+            .with(RetryTransientMiddleware::new_with_policy(retry_policy))
+            .build()
     };
 
-    static ref NO_PROXY_CLIENT: reqwest::Client = {
-        reqwest::Client::builder()
+    static ref NO_PROXY_CLIENT: ClientWithMiddleware = {
+        let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(60))
             .build()
-            .expect("Failed to create No Proxy Client")
+            .expect("Failed to create No Proxy Client");
+        // Retry up to 3 times with increasing intervals between attempts.
+        let retry_policy = ExponentialBackoff::builder().build_with_max_retries(3);
+        ClientBuilder::new(client)
+            .with(RetryTransientMiddleware::new_with_policy(retry_policy))
+            .build()
     };
 }
 
@@ -66,7 +83,7 @@ pub async fn fetch_content(source: impl AsRef<str>) -> Result<Payload> {
     }
 }
 
-fn crawling_client(url: &str) -> &'static reqwest::Client {
+fn crawling_client(url: &str) -> &'static ClientWithMiddleware {
     if url.contains("www.twse.com.tw") || url.contains("www.tpex.org.tw") {
         &NO_PROXY_CLIENT
     } else {
