@@ -6,8 +6,10 @@ mod repository;
 use chrono::{DateTime, Local, NaiveDate, TimeZone};
 use clap::Parser;
 use config::setting::SETTINGS;
+use futures::future::abortable;
 use repository::adapter::Adapter;
 use sqlx::postgres::PgPoolOptions;
+use tokio::signal;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -37,23 +39,41 @@ async fn main() {
         None => Local::now(),
     };
 
-    match args.target.as_str() {
-        "daily_close" => process::daily_close::execute(date).await,
-        "three_primary" => process::three_primary::execute(date).await,
-        "concentration" => {
-            // Create a connection pool
-            let pool = PgPoolOptions::new()
-                .max_connections(5)
-                .connect(&SETTINGS.database.connection_string())
-                .await
-                .ok()
-                .unwrap();
+    // Create a task handle for the main processing logic
+    let (crawling_task, abort_handle) = abortable(async move {
+        match args.target.as_str() {
+            "daily_close" => process::daily_close::execute(date).await,
+            "three_primary" => process::three_primary::execute(date).await,
+            "concentration" => {
+                // Create a connection pool
+                let pool = PgPoolOptions::new()
+                    .max_connections(5)
+                    .connect(&SETTINGS.database.connection_string())
+                    .await
+                    .ok()
+                    .unwrap();
 
-            let pg_adapter = Adapter::new(pool);
-            let ids = pg_adapter.get_stock_ids().await.ok().unwrap();
+                let pg_adapter = Adapter::new(pool);
+                let ids = pg_adapter.get_stock_ids().await.ok().unwrap();
 
-            process::concentration::execute(ids).await;
+                process::concentration::execute(ids).await;
+            }
+            target => eprintln!("Unknown target: {}", target),
         }
-        target => eprintln!("Unknown target: {}", target),
+    });
+
+    tokio::select! {
+        _ = signal::ctrl_c() => {
+            println!("Received Ctrl-C, shutting down...");
+            abort_handle.abort();
+        }
+        result = crawling_task => {
+            match result {
+                Ok(_) => println!("Crawling task completed successfully"),
+                Err(e) => println!("Crawling task failed: {:?}", e),
+            }
+        }
     }
+
+    println!("Shutdown complete");
 }
