@@ -27,7 +27,9 @@ encoding_rs = "0.8"
 config = "0.14"
 serde_yaml = "0.9"
 lazy_static = "1.5"
-sqlx = { version = "0.7", features = ["postgres", "runtime-tokio-native-tls"] }
+sqlx = { version = "0.8", features = ["postgres", "runtime-tokio-native-tls"] }
+reqwest-retry = "0.6"
+reqwest-middleware = "0.3"
 
 [dev-dependencies]
 tokio-test = "0.4"
