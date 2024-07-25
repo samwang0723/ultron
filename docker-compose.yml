@@ -1,10 +1,9 @@
-version: '3.5'
 services:
   ultron:
     container_name: ultron
-    image: samwang0723/ultron:v0.2.0
-    env_file:
-      - ../.env
+    image: samwang0723/ultron:v1.0.0
+    env-file:
+      - .env
     networks:
       - default
 networks:

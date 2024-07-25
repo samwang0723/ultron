@@ -1,4 +1,3 @@
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -14,23 +13,20 @@ spec:
         app: ultron
     spec:
       containers:
-      - name: application
-        image: samwang0723/ultron:v0.1.0
+      - name: ultron
+        image: samwang0723/ultron:v1.0.0
         imagePullPolicy: Always
-        restartPolicy: Never
+        args: ["--target=concentration"]  # This will override the CMD in the Dockerfile
         env:
-        - name: PROXY_USER
-          valueFrom:
-            secretKeyRef:
-              name: proxy-secret
-              key: username
+        - name: ENV
+          value: prod
         - name: PROXY_PASSWD
           valueFrom:
             secretKeyRef:
               name: proxy-secret
               key: passwd
-        - name: KAFKA_BROKERS
+        - name: DB_PASSWD
           valueFrom:
             secretKeyRef:
-              name: kafka-brokers
-              key: brokers
+              name: database-secret
+              key: password

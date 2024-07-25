@@ -1,30 +1,44 @@
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use encoding_rs::*;
-use once_cell::sync::Lazy;
+use lazy_static::lazy_static;
+use reqwest::header::HeaderMap;
 use reqwest::StatusCode;
+use std::time::Duration;
 use tokio::fs;
 
+use crate::config::setting::SETTINGS;
+
 #[cfg(feature = "testing")]
-static CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
-    reqwest::Client::builder()
-        .build()
-        .expect("Failed to create Client")
-});
+lazy_static! {
+    static ref CLIENT: reqwest::Client = {
+        reqwest::Client::builder()
+            .build()
+            .expect("Failed to create Client")
+    };
+}
 
 // Define a static instance of `Client` which will be initialized on the first use
 #[cfg(not(feature = "testing"))]
-static CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
-    let account = std::env::var("PROXY_USER").unwrap();
-    let password = std::env::var("PROXY_PASSWD").unwrap();
-    let proxy_url = format!("http://{}:{}@gate.smartproxy.com:7000", account, password);
-    let proxy = reqwest::Proxy::https(proxy_url).expect("Failed to create proxy");
-    reqwest::Client::builder()
-        .proxy(proxy)
-        // Optionally configure the client
-        .build()
-        .expect("Failed to create Client")
-});
+lazy_static! {
+    static ref CLIENT: reqwest::Client =  {
+        let proxy =
+            reqwest::Proxy::https(SETTINGS.proxy.connection_string()).expect("Failed to create proxy");
+        reqwest::Client::builder()
+            .proxy(proxy)
+            .timeout(Duration::from_secs(60))
+            // Optionally configure the client
+            .build()
+            .expect("Failed to create Client")
+    };
+
+    static ref NO_PROXY_CLIENT: reqwest::Client = {
+        reqwest::Client::builder()
+            .timeout(Duration::from_secs(60))
+            .build()
+            .expect("Failed to create No Proxy Client")
+    };
+}
 
 #[derive(Debug, Clone)]
 pub struct Payload {
@@ -52,6 +66,14 @@ pub async fn fetch_content(source: impl AsRef<str>) -> Result<Payload> {
     }
 }
 
+fn crawling_client(url: &str) -> &'static reqwest::Client {
+    if url.contains("www.twse.com.tw") || url.contains("www.tpex.org.tw") {
+        &NO_PROXY_CLIENT
+    } else {
+        &CLIENT
+    }
+}
+
 struct UrlFetcher<'a>(pub(crate) &'a str);
 struct FileFetcher<'a>(pub(crate) &'a str);
 
@@ -60,14 +82,11 @@ impl<'a> Fetch for UrlFetcher<'a> {
     type Error = anyhow::Error;
 
     async fn fetch(&self) -> Result<Payload, Self::Error> {
-        let resp = CLIENT.get(self.0).send().await?;
+        let target = self.0;
+        let resp = crawling_client(target).get(target).send().await?;
         match resp.status() {
             StatusCode::OK => {
-                let content_type = resp
-                    .headers()
-                    .get("content-type")
-                    .map(|v| v.to_str().unwrap_or_default().to_owned())
-                    .unwrap_or_default();
+                let content_type = self.get_content_type(resp.headers());
 
                 // Charset checking
                 let charset = if ["ms950", "big5", "csv"]
@@ -102,6 +121,16 @@ impl<'a> Fetch for UrlFetcher<'a> {
 }
 
 impl UrlFetcher<'_> {
+    fn get_content_type(&self, headers: &HeaderMap) -> String {
+        match headers.get("content-type") {
+            Some(header_value) => match header_value.to_str() {
+                Ok(value) => value.to_owned(),
+                Err(_) => String::new(), // Handle the error case, e.g., log the error
+            },
+            None => String::new(), // Handle the case where the header is not present
+        }
+    }
+
     fn decode_big5(&self, input: &[u8]) -> Result<String, anyhow::Error> {
         let (decoded_content, _, had_errors) = BIG5.decode(input);
         if had_errors {

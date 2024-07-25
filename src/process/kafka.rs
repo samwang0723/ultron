@@ -9,6 +9,7 @@ pub struct Producer {
 
 impl Producer {
     pub fn new(brokers: &str) -> Self {
+        println!("Creating producer with brokers: {}", brokers);
         let producer: FutureProducer = ClientConfig::new()
             .set("bootstrap.servers", brokers)
             .set("message.timeout.ms", "5000")

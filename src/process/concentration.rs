@@ -1,7 +1,9 @@
 use super::kafka::Producer;
+use crate::config::setting::SETTINGS;
 use crate::engine::fetcher::{fetch_content, Payload};
 use crate::engine::models::concentration::Concentration;
-use crate::engine::parser::{ConcentrationStrategy, Parser};
+use crate::engine::parser::Parser;
+use crate::engine::strategies::concentration::ConcentrationStrategy;
 
 use chrono::{Datelike, Local};
 use std::collections::HashMap;
@@ -98,8 +100,7 @@ async fn aggregate(mut content_rx: mpsc::Receiver<Payload>) {
     let today = Local::now();
     let formatted_date = format!("{}{:02}{:02}", today.year(), today.month(), today.day());
     let mut stock_map: HashMap<String, Concentration> = HashMap::new();
-    let kafka_brokers = std::env::var("KAFKA_BROKERS").unwrap();
-    let kproducer = Producer::new(kafka_brokers.as_str());
+    let kproducer = Producer::new(&SETTINGS.kafka.brokers);
 
     while let Some(payload) = content_rx.recv().await {
         let url = payload.source.clone();

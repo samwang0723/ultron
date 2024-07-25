@@ -3,3 +3,6 @@
 .env
 secret.yml
 .DS_Store
+config.prod.yaml
+config.stg.yaml
+config.dev.yaml

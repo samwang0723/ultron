@@ -1,0 +1,11 @@
+database:
+  host: "localhost"
+  port: "5432"
+  user: "demo_app"
+  dbname: "demo_main"
+kafka:
+  brokers: "localhost:9092"
+proxy:
+  host: "proxy.com"
+  port: "5000"
+  username: "demo-user"

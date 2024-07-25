@@ -1,7 +1,7 @@
 use crate::config::setting::SETTINGS;
 use crate::engine::fetcher::{fetch_content, Payload};
 use crate::engine::parser::Parser;
-use crate::engine::strategies::daily_close::DailyCloseStrategy;
+use crate::engine::strategies::three_primary::ThreePrimaryStrategy;
 use crate::process::kafka::Producer;
 
 use chrono::{DateTime, Datelike, Local};
@@ -31,12 +31,12 @@ fn get_date(day: DateTime<Local>, exchange_type: &str) -> String {
 
 async fn generate_urls(date: DateTime<Local>, url_tx: mpsc::Sender<String>) {
     let twse_url = format!(
-        "https://www.twse.com.tw/exchangeReport/MI_INDEX?response=csv&date={}&type=ALLBUT0999",
+        "https://www.twse.com.tw/rwd/zh/fund/T86?response=csv&date={}&selectType=ALLBUT0999",
         get_date(date, "twse")
     );
 
     let tpex_url = format!(
-        "https://www.tpex.org.tw/web/stock/aftertrading/daily_close_quotes/stk_quote_download.php?l=zh-tw&d={}&s=0,asc,0",
+        "https://www.tpex.org.tw/web/stock/3insti/daily_trade/3itrade_hedge_result.php?l=zh-tw&o=csv&se=EW&t=D&d={}",
         get_date(date, "tpex")
     );
 
@@ -86,29 +86,22 @@ async fn fetch_urls(date: DateTime<Local>, mut url_rx: mpsc::Receiver<String>, c
 }
 
 async fn aggregate(date: DateTime<Local>, mut content_rx: mpsc::Receiver<Payload>) {
-    let kproducer = Producer::new(&SETTINGS.kafka.connection_string());
+    let kproducer = Producer::new(&SETTINGS.kafka.brokers);
 
     while let Some(raw) = content_rx.recv().await {
         let mut raw_payload = raw.clone();
         raw_payload.date = Some(get_date(date, "twse"));
-        let parser = Parser::new(DailyCloseStrategy);
+        let parser = Parser::new(ThreePrimaryStrategy);
         match parser.parse(raw_payload).await {
             Ok(result) => {
-                // print result
-                println!("Parsed result: {:?}", result);
-
                 for record in result {
-                    match record.to_json() {
-                        Ok(payload) => {
-                            match &kproducer
-                                .send("dailycloses-v1".to_string(), payload.clone())
-                                .await
-                            {
-                                Ok(_) => println!("{}", payload),
-                                Err(e) => eprintln!("Failed to send message: {}", e),
-                            }
-                        }
-                        Err(e) => eprintln!("Failed to convert record to JSON: {}", e),
+                    let payload = record.to_json().unwrap();
+                    match &kproducer
+                        .send("threeprimary-v1".to_string(), payload.clone())
+                        .await
+                    {
+                        Ok(_) => println!("{}", payload),
+                        Err(e) => eprintln!("Failed to send message: {}", e),
                     }
                 }
             }
