@@ -33,9 +33,9 @@ impl CsvIndexSet {
     pub fn new_tpex() -> Self {
         Self {
             stock_id: 0,
-            trade_shares: 8,
-            transactions: 10,
-            turnover: 9,
+            trade_shares: 7,
+            transactions: 9,
+            turnover: 8,
             open: 4,
             high: 5,
             low: 6,
