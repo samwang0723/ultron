@@ -36,7 +36,7 @@ async fn generate_urls(date: DateTime<Local>, url_tx: mpsc::Sender<String>) {
     );
 
     let tpex_url = format!(
-        "https://www.tpex.org.tw/web/stock/aftertrading/daily_close_quotes/stk_quote_download.php?l=zh-tw&d={}&s=0,asc,0",
+        "https://wwwov.tpex.org.tw/web/stock/aftertrading/otc_quotes_no1430/stk_wn1430_result.php?l=zh-tw&o=csv&d={}&se=EW&s=0,asc,0",
         get_date(date, "tpex")
     );
 
